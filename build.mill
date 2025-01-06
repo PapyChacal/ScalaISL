@@ -1,0 +1,93 @@
+// VSC version plugin
+import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
+import de.tobiasroeser.mill.vcs.version.VcsVersion
+
+import mill._, scalalib._
+
+import mill.scalalib.publish.{PomSettings, License, VersionControl}
+
+import mill.define.ModuleRef
+
+import os._
+
+object `package` extends RootModule with ScalaModule with PublishModule {
+
+  override def artifactName = "scaisl"
+
+  override def pomSettings = PomSettings(
+    description = artifactName(),
+    organization = "com.github.papychacal",
+    url = "https://github.com/papychacal/scaisl",
+    licenses = Seq(License.MIT),
+    versionControl = VersionControl.github(owner = "papychacal", repo = "scaisl"),
+    // TODO ?
+    developers = Seq()
+  )
+
+  override def publishVersion: T[String] = VcsVersion.vcsState().format()
+  
+  def scalaVersion = "3.3.4"
+
+  def ivyDeps = Agg(
+    ivy"com.github.jnr:jnr-ffi:2.2.17"
+  )
+
+  def islDir = T.source { millSourcePath / "isl" }
+
+  def numThreads = java.lang.Thread.activeCount()
+
+  def compileISL = T {
+    val islDirPath = islDir().path
+    val configure_path = (islDirPath / "configure").relativeTo(T.dest)
+    if(os.proc(configure_path, "--prefix", T.dest / "install")
+      .call(cwd = T.dest, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
+      throw new Exception("Failed to configure ISL")
+    }
+    if(os.proc("make", s"-j$numThreads", "install").call(cwd = T.dest, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
+      throw new Exception("Failed to build ISL")
+    }
+
+    PathRef(T.dest)
+  }
+  
+  def ISLLib = T {
+    os.list(compileISL().path / "install" / "lib").map(PathRef(_))
+  }
+
+  def compileISLExtractor = T {
+    val resourceDirPath = T.dest
+    val islDirPath = islDir().path
+    val configure_path = (islDirPath / "interface" / "configure").relativeTo(resourceDirPath)
+    if(os.proc(configure_path)
+      .call(cwd = resourceDirPath, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
+      throw new Exception("Failed to configure ISL extractor")
+    }
+    if(os.proc("make", s"-j$numThreads").call(cwd = resourceDirPath, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
+      throw new Exception("Failed to build ISL extractor")
+    }
+
+    Seq(
+      PathRef(resourceDirPath / "extract_interface")
+    )
+  }
+
+  override def generatedSources = T {
+
+    val ISLOutput = compileISL().path
+
+    val extractor = compileISLExtractor()
+
+    val islDirPath = islDir().path
+    val generatedSourcePath = T.dest / "islgen.scala"
+
+    if(os.proc(extractor,"--language", "scala-3", (islDirPath / "all.h").relativeTo(T.dest), "-I" + (islDirPath / "include").relativeTo(T.dest), "-I" + (ISLOutput / "include").relativeTo(T.dest)).call(cwd = T.dest, stdout = generatedSourcePath, stderr = os.Inherit).exitCode != 0) {
+      throw new Exception("Failed to extract ISL interface")
+    }
+
+    super.generatedSources() :+ PathRef(generatedSourcePath)
+  }
+
+  def resources = T {
+    super.resources() ++ ISLLib()
+  }
+}
