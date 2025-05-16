@@ -21,9 +21,9 @@ object `package` extends RootModule with ScalaModule with SonatypeCentralPublish
   override def pomSettings = PomSettings(
     description = artifactName(),
     organization = "io.github.papychacal",
-    url = "https://github.com/papychacal/scaisl",
+    url = "https://github.com/PapyChacal/ScalaISL",
     licenses = Seq(License.MIT),
-    versionControl = VersionControl.github(owner = "papychacal", repo = "scaisl"),
+    versionControl = VersionControl.github(owner = "papychacal", repo = "scalaisl"),
     // TODO ?
     developers = Seq(
       Developer(
