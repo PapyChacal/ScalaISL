@@ -15,6 +15,9 @@ jobs:
       steps:
         - name: Checkout
           uses: actions/checkout@v4
+
+        - name: Dependencies
+          run: apt install -y llvm-18
         
         - name: Build
           run: ./mill compile
