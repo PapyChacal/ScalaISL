@@ -16,7 +16,7 @@ import os._
 
 object `package` extends RootModule with ScalaModule with SonatypeCentralPublishModule {
 
-  override def artifactName = "scaisl"
+  override def artifactName = "scalaisl"
 
   override def pomSettings = PomSettings(
     description = artifactName(),
