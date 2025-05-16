@@ -24,6 +24,8 @@ jobs:
 
         - name: Publish
           env:
+            MILL_PGP_SECRET_BASE64: ${{ secrets.PGP_SECRET_BASE64 }}
+            MILL_PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
             MILL_SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
             MILL_SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
           run: ./mill publishSonatypeCentral
