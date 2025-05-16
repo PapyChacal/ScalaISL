@@ -17,7 +17,7 @@ This project is in an **experimental state**, is **not intended for serious or p
 
 - Documentation
 - Tests
-- Any distribution
+- Distribution beyond linux-x86
 
 ## Quick Example
 
@@ -39,7 +39,7 @@ in `src/main/scala-3/isl.scala`
 ```
 
 ### Publish locally
-to use as a dependency
+to build and use as a dependency locally, e.g. try it out on non-linux and/or non-x86.
 
 ```bash
 ./mill publishLocal

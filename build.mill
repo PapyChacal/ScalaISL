@@ -19,7 +19,7 @@ object `package` extends RootModule with ScalaModule with SonatypeCentralPublish
   override def artifactName = "scalaisl"
 
   override def pomSettings = PomSettings(
-    description = artifactName(),
+    description = "*Experimental* Scala 3 bindings for ISL (Integer Set Library)",
     organization = "io.github.papychacal",
     url = "https://github.com/PapyChacal/ScalaISL",
     licenses = Seq(License.MIT),
