@@ -2,26 +2,36 @@
 import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
 import de.tobiasroeser.mill.vcs.version.VcsVersion
 
+// Sonatype Central publish plugin
+import $ivy.`com.lihaoyi::mill-contrib-sonatypecentral:`
+import mill.contrib.sonatypecentral.SonatypeCentralPublishModule
+
 import mill._, scalalib._
 
-import mill.scalalib.publish.{PomSettings, License, VersionControl}
+import mill.scalalib.publish.{PomSettings, License, VersionControl, Developer}
 
 import mill.define.ModuleRef
 
 import os._
 
-object `package` extends RootModule with ScalaModule with PublishModule {
+object `package` extends RootModule with ScalaModule with SonatypeCentralPublishModule {
 
-  override def artifactName = "scaisl"
+  override def artifactName = "scalaisl"
 
   override def pomSettings = PomSettings(
-    description = artifactName(),
-    organization = "com.github.papychacal",
-    url = "https://github.com/papychacal/scaisl",
+    description = "*Experimental* Scala 3 bindings for ISL (Integer Set Library)",
+    organization = "io.github.papychacal",
+    url = "https://github.com/PapyChacal/ScalaISL",
     licenses = Seq(License.MIT),
-    versionControl = VersionControl.github(owner = "papychacal", repo = "scaisl"),
+    versionControl = VersionControl.github(owner = "papychacal", repo = "scalaisl"),
     // TODO ?
-    developers = Seq()
+    developers = Seq(
+      Developer(
+        id="papychacal",
+        name = "Emilien Bauer",
+        url = "https://github.com/PapyChacal"
+      )
+    )
   )
 
   override def publishVersion: T[String] = VcsVersion.vcsState().format()
@@ -32,7 +42,16 @@ object `package` extends RootModule with ScalaModule with PublishModule {
     ivy"com.github.jnr:jnr-ffi:2.2.17"
   )
 
-  def islDir = T.source { millSourcePath / "isl" }
+  def islDir = T.source {
+    val dir = millSourcePath / "isl"
+    if(!os.exists(dir / "configure")) {
+      if(os.proc("./autogen.sh")
+        .call(cwd = dir, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
+        throw new Exception("Failed to run ISL's autogen")
+      }
+    }
+    dir
+   }
 
   def numThreads = java.lang.Thread.activeCount()
 
@@ -55,6 +74,7 @@ object `package` extends RootModule with ScalaModule with PublishModule {
   }
 
   def compileISLExtractor = T {
+    compileISL()
     val resourceDirPath = T.dest
     val islDirPath = islDir().path
     val configure_path = (islDirPath / "interface" / "configure").relativeTo(resourceDirPath)
