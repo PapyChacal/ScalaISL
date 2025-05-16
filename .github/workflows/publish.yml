@@ -1,0 +1,22 @@
+name: Publishing
+
+# Run on every push to main and every change on pull requests
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+    publish:
+      runs-on: ubuntu-latest
+      steps:
+        - name: Checkout
+          uses: actions/checkout@v4
+        
+        - name: Build
+          run: ./mill compile
+
+        
