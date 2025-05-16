@@ -126,8 +126,7 @@ std::string to_snake_case(std::string s) noexcept {
 }
 
 std::string isl_class_to_scala(const std::string &s) {
-    if(s.substr(0, 4) != "isl_")
-        throw std::invalid_argument("Invalid isl class name: `" + s + "`");
+    assert(s.substr(0, 4) == "isl_" || ("Invalid isl class name: `" + s + "`").c_str());
     return to_camel_case(s.substr(4));
 }
 
@@ -199,7 +198,8 @@ std::string scala_generator::isl_type_to_scala(const QualType &type) {
             return isl_class_to_scala(t.getAsString().substr(6));
         return isl_class_to_scala(t.getAsString());
     }
-    throw std::invalid_argument("Invalid type name: `" + type.getAsString() + "`");
+    std::cerr << "Invalid type name: `" + type.getAsString() + "`" << std::endl;
+    exit(1);
 }
 
 void scala_generator::printParametersList(std::ostream &os, ArrayRef<ParmVarDecl*> parameters) {
