@@ -32,7 +32,16 @@ object `package` extends RootModule with ScalaModule with PublishModule {
     ivy"com.github.jnr:jnr-ffi:2.2.17"
   )
 
-  def islDir = T.source { millSourcePath / "isl" }
+  def islDir = T.source {
+    val dir = millSourcePath / "isl"
+    if(!os.exists(dir / "configure")) {
+      if(os.proc("./autogen.sh")
+        .call(cwd = dir, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
+        throw new Exception("Failed to run ISL's autogen")
+      }
+    }
+    dir
+   }
 
   def numThreads = java.lang.Thread.activeCount()
 
