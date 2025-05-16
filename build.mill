@@ -20,7 +20,7 @@ object `package` extends RootModule with ScalaModule with SonatypeCentralPublish
 
   override def pomSettings = PomSettings(
     description = artifactName(),
-    organization = "com.github.papychacal",
+    organization = "io.github.papychacal",
     url = "https://github.com/papychacal/scaisl",
     licenses = Seq(License.MIT),
     versionControl = VersionControl.github(owner = "papychacal", repo = "scaisl"),
