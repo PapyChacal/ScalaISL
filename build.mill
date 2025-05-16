@@ -8,7 +8,7 @@ import mill.contrib.sonatypecentral.SonatypeCentralPublishModule
 
 import mill._, scalalib._
 
-import mill.scalalib.publish.{PomSettings, License, VersionControl}
+import mill.scalalib.publish.{PomSettings, License, VersionControl, Developer}
 
 import mill.define.ModuleRef
 
@@ -25,7 +25,13 @@ object `package` extends RootModule with ScalaModule with SonatypeCentralPublish
     licenses = Seq(License.MIT),
     versionControl = VersionControl.github(owner = "papychacal", repo = "scaisl"),
     // TODO ?
-    developers = Seq()
+    developers = Seq(
+      Developer(
+        id="papychacal",
+        name = "Emilien Bauer",
+        url = "https://github.com/PapyChacal"
+      )
+    )
   )
 
   override def publishVersion: T[String] = VcsVersion.vcsState().format()
