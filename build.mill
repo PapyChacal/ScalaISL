@@ -64,6 +64,7 @@ object `package` extends RootModule with ScalaModule with PublishModule {
   }
 
   def compileISLExtractor = T {
+    compileISL()
     val resourceDirPath = T.dest
     val islDirPath = islDir().path
     val configure_path = (islDirPath / "interface" / "configure").relativeTo(resourceDirPath)
