@@ -22,4 +22,10 @@ jobs:
         - name: Build
           run: ./mill compile
 
+        - name: Publish
+          env:
+            MILL_SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+            MILL_SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          run: ./mill publishSonatypeCentral
+
         
