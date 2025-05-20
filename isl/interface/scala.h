@@ -17,9 +17,9 @@ public:
 		set<FunctionDecl *> functions);
 
     void generate() override;
-    std::string isl_type_to_scala(const QualType &type);
-	void printParametersList(std::ostream &os, ArrayRef<ParmVarDecl*> parameters);
-	void printFunctionParameters(std::ostream &os, const FunctionDecl *f, bool use_given);
+    std::string isl_type_to_scala(const QualType &type, const bool for_jni = false);
+	void printParametersList(std::ostream &os, ArrayRef<ParmVarDecl*> parameters, const bool for_jni = false);
+	void printFunctionParameters(std::ostream &os, const FunctionDecl *f, bool use_given, const bool for_jni = false);
 	void printMethodParameters(std::ostream &os, const FunctionDecl *f);
 	void printLibraryCall(std::ostream &os, const FunctionDecl *f, bool as_method);
 	void printId(std::ostream &os, const std::string& id);

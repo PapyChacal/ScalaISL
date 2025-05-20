@@ -1,5 +1,7 @@
 import com.github.papychacal.isl.*
 
+// given cvtptr: [C] => Conversion[C, Pointer] => Conversion[AbstractReference[C], AbstractReference[Pointer]] = (ref:AbstractReference[C]) => new AbstractReference(ref.getValue().p)
+
 object ISL:
   
   def main(args: Array[String]): Unit =
