@@ -36,7 +36,7 @@ object `package` extends RootModule with ScalaModule with SonatypeCentralPublish
 
   override def publishVersion: T[String] = VcsVersion.vcsState().format()
   
-  def scalaVersion = "3.3.4"
+  def scalaVersion = "3.6.4"
 
   def ivyDeps = Agg(
     ivy"com.github.jnr:jnr-ffi:2.2.17"

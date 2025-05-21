@@ -22,6 +22,42 @@ scala_generator::scala_generator(SourceManager &SM, set<RecordDecl *> &exported_
 	set<FunctionDecl *> exported_functions, set<FunctionDecl *> functions) :
         generator(SM, exported_types, exported_functions, functions)
 {
+    set<FunctionDecl *> non_exported_functions;
+    std::set_difference(functions.begin(), functions.end(),
+        exported_functions.begin(), exported_functions.end(),
+        std::inserter(non_exported_functions, non_exported_functions.end()));
+
+    for (const auto& c : classes) {
+        const auto& class_name = c.first;
+        auto& cls = classes[c.first];
+
+        for(const auto& f : non_exported_functions) {
+
+            if(f->getName().substr(0, class_name.size()) != class_name)
+                continue;
+            if(f->getName().contains("try"))
+                continue;
+
+            auto methodName = f->getNameAsString().substr(class_name.size() + 1);
+
+            if(methodName == "copy") {
+                cls.fn_copy = f;
+                continue;
+            }
+            if(methodName == "free") {
+                cls.fn_free = f;
+                continue;
+            }
+            if(methodName == "to_str") {
+                cls.fn_to_str = f;
+                continue;
+            }
+            if(cls.methods.find(methodName) == cls.methods.end()) {
+                cls.methods[methodName] = {};
+            }
+            cls.methods[methodName].insert(f);
+        }
+    }
 	const std::vector<std::string> extra_classes = {
         "isl_ctx",
         "isl_printer",
@@ -244,7 +280,7 @@ void scala_generator::printFunctionParameters(std::ostream &os, const FunctionDe
 }
 
 void scala_generator::printId(std::ostream &os, const std::string& id) {
-    bool escape = id == "type" || id == "val";
+    bool escape = id == "type" || id == "val" || id == "match" || isdigit(id[0]);
     if(escape){
         os << "`";
     }
@@ -307,7 +343,8 @@ void scala_generator::generate()
        << "import jnr.ffi.types.*" << std::endl
        << "import jnr.ffi.byref.*" << std::endl
        << "import jnr.ffi.annotations.Delegate" << std::endl << std::endl
-       << "class File(val p: Pointer) extends AnyVal {}" << std::endl;
+       << "class File(val p: Pointer) extends AnyVal {}" << std::endl
+       << "given [C] => Conversion[C, Pointer] => Conversion[AbstractReference[C], PointerByReference] = (a : AbstractReference[C]) => new PointerByReference(a.getValue())" << std::endl;
 
     os << "private[isl] val lib = LibraryLoader.create(classOf[ISLLib])" << std::endl;
     os << "  " << ".load(\"isl\")" << std::endl << std::endl;
