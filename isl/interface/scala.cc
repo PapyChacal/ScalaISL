@@ -343,12 +343,19 @@ void scala_generator::generate()
                     continue;
                 auto prefixLessName = m->getNameAsString().substr(c.first.length() + 1);
                 auto name = to_snake_case(prefixLessName);
-                os << "  def ";
+                os << "  inline def ";
                 printId(os, name);
                 printMethodParameters(os, m);
                 os << " =" << std::endl;
                 printLibraryCall(os, m, true);
                 os << std::endl;
+
+                if(name == "isEqual") {
+                    os << "  inline override def equals(other: Any) =" << std::endl;
+                    os << "    other match" << std::endl;
+                    os << "      case that: " << isl_class_to_scala(c.first) << " => isEqual(that) == 1" << std::endl;
+                    os << "      case _ => false" << std::endl;
+                }
             }
         }
 
@@ -371,19 +378,15 @@ void scala_generator::generate()
             os << "    lib." << c.second.fn_copy->getNameAsString() << "(this)" << std::endl;
         }
         os << "}" << std::endl << std::endl;
-        if(c.second.superclass_name != "") {
-            auto sc = c.second.superclass_name;
-            while(sc != "") {
-                os << "given Conversion[" << isl_class_to_scala(c.first) << ", " << isl_class_to_scala(sc) << "] with" << std::endl;
-                os << "  def apply(that: " << isl_class_to_scala(c.first) << "): " << isl_class_to_scala(sc) << " =" << std::endl;
-                os << "    new " << isl_class_to_scala(sc) << "(that.p)" << std::endl << std::endl;
-                sc = classes[sc].superclass_name;
-            }
-        }
         
         os << "object " << isl_class_to_scala(c.first) << ":" << std::endl;
         os << "  private[isl] given Conversion[" << isl_class_to_scala(c.first) << ", Pointer] = _.p" << std::endl;
         os << "  private[isl] given Conversion[Pointer, " << isl_class_to_scala(c.first) << "] = new " << isl_class_to_scala(c.first) << "(_)" << std::endl;
+        auto sc = c.second.superclass_name;
+        while(sc != "") {
+            os << "given Conversion[" << isl_class_to_scala(c.first) << ", " << isl_class_to_scala(sc) << "] = new " << isl_class_to_scala(sc) << "(_)" << std::endl;
+            sc = classes[sc].superclass_name;
+        }
         for (const auto & cc : c.second.constructors) {
             auto prefixLessName = cc->getNameAsString().substr(c.first.length() + 1);
             os << "  @targetName(\"" << cc->getNameAsString() << "\")" << std::endl;
