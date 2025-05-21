@@ -29,7 +29,7 @@ object `package` extends RootModule with ScalaModule with SonatypeCentralPublish
     )
   )
 
-  override def publishVersion: T[String] = VcsVersion.vcsState().format(untaggedSuffix = "-SNAPSHOT")
+  override def publishVersion: T[String] = VcsVersion.vcsState().format()
   
   def scalaVersion = "3.6.4"
 
