@@ -1,11 +1,6 @@
 // VSC version plugin
 import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
 import de.tobiasroeser.mill.vcs.version.VcsVersion
-
-// Sonatype Central publish plugin
-import $ivy.`com.lihaoyi::mill-contrib-sonatypecentral:`
-import mill.contrib.sonatypecentral.SonatypeCentralPublishModule
-
 import mill._, scalalib._
 
 import mill.scalalib.publish.{PomSettings, License, VersionControl, Developer}
@@ -34,7 +29,7 @@ object `package` extends RootModule with ScalaModule with SonatypeCentralPublish
     )
   )
 
-  override def publishVersion: T[String] = VcsVersion.vcsState().format(untaggedSuffix = "-SNAPSHOT")
+  override def publishVersion: T[String] = VcsVersion.vcsState().format()
   
   def scalaVersion = "3.6.4"
 
