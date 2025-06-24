@@ -37,22 +37,29 @@ object `package` extends RootModule with ScalaModule with SonatypeCentralPublish
     ivy"com.github.jnr:jnr-ffi:2.2.17"
   )
 
-  def islDir = T.source {
-    val dir = millSourcePath / "isl"
+  def islDir = millSourcePath / "isl"
+
+  def islSources = T.sources {
+    val dir = islDir
     if(!os.exists(dir / "configure")) {
       if(os.proc("./autogen.sh")
         .call(cwd = dir, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
         throw new Exception("Failed to run ISL's autogen")
       }
     }
-    dir
+    val all = os.list(dir).filter(_.last != "interface")
+    all.map(PathRef(_))
+   }
+
+   def islExtractorSources = T.source {
+    PathRef(islDir / "interface")
    }
 
   def numThreads = java.lang.Thread.activeCount()
 
   def compileISL = T {
-    val islDirPath = islDir().path
-    val configure_path = (islDirPath / "configure").relativeTo(T.dest)
+    islSources()
+    val configure_path = (islDir / "configure").relativeTo(T.dest)
     if(os.proc(configure_path, "--prefix", T.dest / "install")
       .call(cwd = T.dest, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
       throw new Exception("Failed to configure ISL")
@@ -70,9 +77,10 @@ object `package` extends RootModule with ScalaModule with SonatypeCentralPublish
 
   def compileISLExtractor = T {
     compileISL()
+    islExtractorSources()
+
     val resourceDirPath = T.dest
-    val islDirPath = islDir().path
-    val configure_path = (islDirPath / "interface" / "configure").relativeTo(resourceDirPath)
+    val configure_path = (islDir / "interface" / "configure").relativeTo(resourceDirPath)
     if(os.proc(configure_path)
       .call(cwd = resourceDirPath, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
       throw new Exception("Failed to configure ISL extractor")
@@ -92,10 +100,9 @@ object `package` extends RootModule with ScalaModule with SonatypeCentralPublish
 
     val extractor = compileISLExtractor()
 
-    val islDirPath = islDir().path
     val generatedSourcePath = T.dest / "islgen.scala"
 
-    if(os.proc(extractor,"--language", "scala-3", (islDirPath / "all.h").relativeTo(T.dest), "-I" + (islDirPath / "include").relativeTo(T.dest), "-I" + (ISLOutput / "include").relativeTo(T.dest)).call(cwd = T.dest, stdout = generatedSourcePath, stderr = os.Inherit).exitCode != 0) {
+    if(os.proc(extractor,"--language", "scala-3", (islDir / "all.h").relativeTo(T.dest), "-I" + (islDir / "include").relativeTo(T.dest), "-I" + (ISLOutput / "include").relativeTo(T.dest)).call(cwd = T.dest, stdout = generatedSourcePath, stderr = os.Inherit).exitCode != 0) {
       throw new Exception("Failed to extract ISL interface")
     }
 
