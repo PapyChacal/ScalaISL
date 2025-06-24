@@ -1,6 +1,6 @@
 import com.github.papychacal.isl.*
 
-object ISL:
+object Example:
   
   def main(args: Array[String]): Unit =
     given ctx: Ctx = Ctx()
