@@ -337,7 +337,7 @@ void scala_generator::generate()
 
     os << "package com.github.papychacal.isl" << std::endl
        << std::endl
-       << "import scala.annotation.targetName" << std::endl
+       << "import scala.annotation.{targetName, switch}" << std::endl
        << std::endl
        << "import jnr.ffi.*" << std::endl
        << "import jnr.ffi.types.*" << std::endl
@@ -443,10 +443,16 @@ void scala_generator::generate()
         os << "object " << scala_class_name << ":" << std::endl;
         os << "  private[isl] given Conversion[" << scala_class_name << ", Pointer] = _.p" << std::endl;
         os << "  private[isl] given Conversion[Pointer, " << scala_class_name << "] = ";
-        if(superclass_name == "")
+
+        if(c.second.fn_type == nullptr)
           os << "new " << scala_class_name << "(_)" << std::endl;
-        else
-          os << "new " << scala_class_name << "(_)" << std::endl;
+        else {
+          os << " p => lib." << c.second.fn_type->getNameAsString() << "(p: @switch) match" << std::endl;
+          for(const auto& v : c.second.type_subclasses)
+            os << "    case " << v.first << " => summon[Conversion[Pointer, " << isl_class_to_scala(v.second) << "]].apply(p)" << std::endl;
+        }
+        os << std::endl;
+        
         for (const auto & cc : c.second.constructors) {
             auto prefixLessName = cc->getNameAsString().substr(class_name.length() + 1);
             os << "  @targetName(\"" << cc->getNameAsString() << "\")" << std::endl;
