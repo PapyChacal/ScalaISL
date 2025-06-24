@@ -369,18 +369,39 @@ void scala_generator::generate()
     }
 
     for (const auto &c : classes) {
-        if(c.first.substr(0, 4) != "isl_"){
-            std::cerr << "Warning: `" << c.first <<"` in the classes list?" << std::endl;
+        auto class_name = c.first;
+        auto superclass_name = c.second.superclass_name;
+
+        if(class_name.substr(0, 4) != "isl_"){
+            std::cerr << "Warning: `" << class_name <<"` in the classes list?" << std::endl;
             continue;
         }
-        os << "class " << isl_class_to_scala(c.first) << " private[isl] (private[isl] var p: Pointer) {" << std::endl;
+
+        auto scala_class_name = isl_class_to_scala(class_name);
+
+        os << "class " << scala_class_name << " private[isl] (private[isl] ";
+        if(superclass_name == "")
+            os << "var ";
+        os << "p: Pointer) ";
+        if(superclass_name != "")
+          os << "extends " << isl_class_to_scala(superclass_name) << "(p)" << std::endl;
+        os << "{" << std::endl;
         for (const auto & ms : c.second.methods) {
             for(const auto & m : ms.second) {
                 if(c.second.is_static(m))
                     continue;
-                auto prefixLessName = m->getNameAsString().substr(c.first.length() + 1);
+                auto prefixLessName = m->getNameAsString().substr(class_name.length() + 1);
                 auto name = to_snake_case(prefixLessName);
-                os << "  inline def ";
+                os << "  ";
+                if(superclass_name != ""){
+                    auto supermethod = superclass_name + "_" + prefixLessName;
+
+                    std::cerr << "Class: " << class_name << ", super: " << superclass_name << std::endl;
+                    std::cerr << "Method: " << m->getNameAsString() << ", supermethod: " << supermethod << std::endl;
+                    if (functions_by_name.count(supermethod))
+                        os << "override ";
+                }
+                os << "def ";
                 printId(os, name);
                 printMethodParameters(os, m);
                 os << " =" << std::endl;
@@ -390,15 +411,15 @@ void scala_generator::generate()
                 if(name == "isEqual") {
                     os << "  inline override def equals(other: Any) =" << std::endl;
                     os << "    other match" << std::endl;
-                    os << "      case that: " << isl_class_to_scala(c.first) << " => isEqual(that) == 1" << std::endl;
+                    os << "      case that: " << scala_class_name << " => isEqual(that) == 1" << std::endl;
                     os << "      case _ => false" << std::endl;
                 }
             }
         }
 
-        std::string print_method_name = "isl_printer_print_" + c.first.substr(4);
+        std::string print_method_name = "isl_printer_print_" + class_name.substr(4);
         const auto& print_method = functions_by_name.find(print_method_name);
-        std::string ctx_getter_name = c.first + "_get_ctx";
+        std::string ctx_getter_name = class_name + "_get_ctx";
         const auto& ctx_getter = functions_by_name.find(ctx_getter_name);
         if(c.second.fn_to_str != nullptr) {
             os << "  override def toString : String =" << std::endl;
@@ -407,25 +428,27 @@ void scala_generator::generate()
             os << "  override def toString : String =" << std::endl;
             os << "    val ctx = " << "lib." << ctx_getter->first << "(this)" << std::endl;
             os << "    val p = Printer(using ctx)()" << std::endl;
-            os << "    p.print" << isl_class_to_scala(c.first) << "(this)" << std::endl;
+            os << "    p.print" << scala_class_name << "(this)" << std::endl;
             os << "    p.getStr()" << std::endl;
         }
         if(c.second.fn_copy != nullptr) {
-            os << "  def copy() =" << std::endl;
+            os << "  ";
+            if(superclass_name != "")
+                os << "override ";
+            os << "def copy(): " << scala_class_name << " =" << std::endl;
             os << "    lib." << c.second.fn_copy->getNameAsString() << "(this)" << std::endl;
         }
         os << "}" << std::endl << std::endl;
         
-        os << "object " << isl_class_to_scala(c.first) << ":" << std::endl;
-        os << "  private[isl] given Conversion[" << isl_class_to_scala(c.first) << ", Pointer] = _.p" << std::endl;
-        os << "  private[isl] given Conversion[Pointer, " << isl_class_to_scala(c.first) << "] = new " << isl_class_to_scala(c.first) << "(_)" << std::endl;
-        auto sc = c.second.superclass_name;
-        while(sc != "") {
-            os << "given Conversion[" << isl_class_to_scala(c.first) << ", " << isl_class_to_scala(sc) << "] = new " << isl_class_to_scala(sc) << "(_)" << std::endl;
-            sc = classes[sc].superclass_name;
-        }
+        os << "object " << scala_class_name << ":" << std::endl;
+        os << "  private[isl] given Conversion[" << scala_class_name << ", Pointer] = _.p" << std::endl;
+        os << "  private[isl] given Conversion[Pointer, " << scala_class_name << "] = ";
+        if(superclass_name == "")
+          os << "new " << scala_class_name << "(_)" << std::endl;
+        else
+          os << "new " << scala_class_name << "(_)" << std::endl;
         for (const auto & cc : c.second.constructors) {
-            auto prefixLessName = cc->getNameAsString().substr(c.first.length() + 1);
+            auto prefixLessName = cc->getNameAsString().substr(class_name.length() + 1);
             os << "  @targetName(\"" << cc->getNameAsString() << "\")" << std::endl;
             os << "  inline def apply";
             printFunctionParameters(os, cc, true);
@@ -439,7 +462,7 @@ void scala_generator::generate()
                     continue;
                 if(m->getNameAsString() == "isl_args_parse")
                     continue;
-                auto prefixLessName = m->getNameAsString().substr(c.first.length() + 1);
+                auto prefixLessName = m->getNameAsString().substr(class_name.length() + 1);
                 auto name = to_snake_case(prefixLessName);
                 os << "  inline def ";
                 printId(os, name);
