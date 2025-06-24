@@ -1,9 +1,9 @@
 package com.github.papychacal.isl
 
-private[isl] given Conversion[Dim, Int] = _.ordinal
-private[isl] given Conversion[Int, Dim] = Dim.fromOrdinal
+private[isl] given Conversion[DimType, Int] = _.ordinal
+private[isl] given Conversion[Int, DimType] = DimType.fromOrdinal
 
-enum Dim:
+enum DimType:
   case Cst
   case Param
   case In

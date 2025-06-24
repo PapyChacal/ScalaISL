@@ -185,7 +185,7 @@ std::string scala_generator::isl_type_to_scala(const QualType &type, const bool 
     if (type.getAsString().substr(0, 5) == "enum ") {
         auto enum_name = type.getAsString().substr(5);
         if(enum_name == "isl_dim_type") {
-            return for_jni ? "Int" : "Dim";
+            return for_jni ? "Int" : "DimType";
         }
         std::cerr << "Warning: interpreting `" << type.getAsString() << "` as an Int!" << std::endl;
         return "Int";
