@@ -1,15 +1,15 @@
-// VSC version plugin
-import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
-import de.tobiasroeser.mill.vcs.version.VcsVersion
+//| mill-version: 1.0.3-native
+
 import mill._, scalalib._
-
+import mill.util.VcsVersion
 import mill.scalalib.publish.{PomSettings, License, VersionControl, Developer}
+import mill.api.Task.{Source, Sources}
 
-import mill.define.ModuleRef
+import mill.api.ModuleRef
 
 import os._
 
-object `package` extends RootModule with ScalaModule with SonatypeCentralPublishModule {
+object `package` extends ScalaModule with SonatypeCentralPublishModule {
 
   override def artifactName = "scalaisl"
 
@@ -29,17 +29,17 @@ object `package` extends RootModule with ScalaModule with SonatypeCentralPublish
     )
   )
 
-  override def publishVersion: T[String] = VcsVersion.vcsState().format()
+  override def publishVersion: T[String] = VcsVersion.vcsState().format(untaggedSuffix = "-SNAPSHOT")
   
-  def scalaVersion = "3.6.4"
+  override def scalaVersion = "3.6.4"
 
-  def ivyDeps = Agg(
-    ivy"com.github.jnr:jnr-ffi:2.2.17"
+  override def mvnDeps = Seq(
+    mvn"com.github.jnr:jnr-ffi:2.2.17"
   )
 
-  def islDir = millSourcePath / "isl"
+  def islDir = moduleDir / "isl"
 
-  def islSources = T.sources {
+  def islSources = Sources({
     val dir = islDir
     if(!os.exists(dir / "configure")) {
       if(os.proc("./autogen.sh")
@@ -47,39 +47,38 @@ object `package` extends RootModule with ScalaModule with SonatypeCentralPublish
         throw new Exception("Failed to run ISL's autogen")
       }
     }
-    val all = os.list(dir).filter(_.last != "interface")
-    all.map(PathRef(_))
-   }
+    os.list(dir).filter(_.last != "interface")
+   }*)
 
-   def islExtractorSources = T.source {
-    PathRef(islDir / "interface")
+   def islExtractorSources = Source {
+    islDir / "interface"
    }
 
   def numThreads = java.lang.Thread.activeCount()
 
-  def compileISL = T {
+  def compileISL = Task {
     islSources()
-    val configure_path = (islDir / "configure").relativeTo(T.dest)
-    if(os.proc(configure_path, "--prefix", T.dest / "install")
-      .call(cwd = T.dest, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
+    val configure_path = (islDir / "configure").relativeTo(Task.dest)
+    if(os.proc(configure_path, "--prefix", Task.dest / "install")
+      .call(cwd = Task.dest, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
       throw new Exception("Failed to configure ISL")
     }
-    if(os.proc("make", s"-j$numThreads", "install").call(cwd = T.dest, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
+    if(os.proc("make", s"-j$numThreads", "install").call(cwd = Task.dest, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
       throw new Exception("Failed to build ISL")
     }
 
-    PathRef(T.dest)
+    Task.dest
   }
   
-  def ISLLib = T {
-    os.list(compileISL().path / "install" / "lib").map(PathRef(_))
+  def ISLLib = Task {
+    os.list(compileISL() / "install" / "lib").map(PathRef(_))
   }
 
-  def compileISLExtractor = T {
+  def compileISLExtractor = Task {
     compileISL()
     islExtractorSources()
 
-    val resourceDirPath = T.dest
+    val resourceDirPath = Task.dest
     val configure_path = (islDir / "interface" / "configure").relativeTo(resourceDirPath)
     if(os.proc(configure_path)
       .call(cwd = resourceDirPath, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
@@ -94,22 +93,22 @@ object `package` extends RootModule with ScalaModule with SonatypeCentralPublish
     )
   }
 
-  override def generatedSources = T {
+  override def generatedSources = Task {
 
-    val ISLOutput = compileISL().path
+    val ISLOutput = compileISL()
 
     val extractor = compileISLExtractor()
 
-    val generatedSourcePath = T.dest / "islgen.scala"
+    val generatedSourcePath = Task.dest / "islgen.scala"
 
-    if(os.proc(extractor,"--language", "scala-3", (islDir / "all.h").relativeTo(T.dest), "-I" + (islDir / "include").relativeTo(T.dest), "-I" + (ISLOutput / "include").relativeTo(T.dest)).call(cwd = T.dest, stdout = generatedSourcePath, stderr = os.Inherit).exitCode != 0) {
+    if(os.proc(extractor,"--language", "scala-3", (islDir / "all.h").relativeTo(Task.dest), "-I" + (islDir / "include").relativeTo(Task.dest), "-I" + (ISLOutput / "include").relativeTo(Task.dest)).call(cwd = Task.dest, stdout = generatedSourcePath, stderr = os.Inherit).exitCode != 0) {
       throw new Exception("Failed to extract ISL interface")
     }
 
     super.generatedSources() :+ PathRef(generatedSourcePath)
   }
 
-  def resources = T {
+  def resources = Task {
     super.resources() ++ ISLLib()
   }
 }
