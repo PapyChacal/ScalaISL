@@ -67,11 +67,11 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
       throw new Exception("Failed to build ISL")
     }
 
-    Task.dest
+    PathRef(Task.dest)
   }
   
   def ISLLib = Task {
-    os.list(compileISL() / "install" / "lib").map(PathRef(_))
+    os.list(compileISL().path / "install" / "lib").map(PathRef(_))
   }
 
   def compileISLExtractor = Task {
@@ -95,7 +95,7 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
 
   override def generatedSources = Task {
 
-    val ISLOutput = compileISL()
+    val ISLOutput = compileISL().path
 
     val extractor = compileISLExtractor()
 
