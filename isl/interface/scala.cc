@@ -420,6 +420,10 @@ void scala_generator::generate()
                     os << "      case that: " << scala_class_name << " => isEqual(that) == 1" << std::endl;
                     os << "      case _ => false" << std::endl;
                 }
+
+                if(name == "getHash") {
+                    os << "  inline override def hashCode() = getHash()" << std::endl;
+                }
             }
         }
 
