@@ -6,4 +6,8 @@ object Example:
     given ctx: Ctx = Ctx()
     val str = "{ [i, j] : 0 <= i <= 10 and 0 <= j <= 10 }"
     val basicSet = BasicSet(str)
-    println(basicSet.samplePoint())
+    basicSet.toSet().foreachPoint((p, u) => {
+      println(p)
+      0
+    },
+      null)
