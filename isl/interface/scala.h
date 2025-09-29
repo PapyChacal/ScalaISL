@@ -24,6 +24,7 @@ public:
 	void printLibraryCall(std::ostream &os, const FunctionDecl *f, bool as_method);
 	void printId(std::ostream &os, const std::string& id);
 	std::string prototype_to_scala(const FunctionProtoType *ft);
+	std::string prototype_to_jni(const FunctionProtoType *ft);
 };
 
 #endif /* ISL_INTERFACE_SCALA_H */
