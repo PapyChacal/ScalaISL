@@ -1,6 +1,6 @@
 name: Publishing
 
-# Run on every push to main and every change on pull requests
+# Run on every push to main, release or change on pull requests
 on:
   push:
     branches: [ "main" ]
@@ -24,7 +24,8 @@ jobs:
           run: ./mill compile
 
         - name: Publish
-          if: github.ref == 'refs/heads/main'
+          # Only actually publish if new main commit or new tag
+          if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
           env:
             MILL_PGP_SECRET_BASE64: ${{ secrets.PGP_SECRET_BASE64 }}
             MILL_PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
