@@ -1,4 +1,4 @@
-//| mill-version: 1.0.3-native
+//| mill-version: 1.1.8-native
 
 import mill._, scalalib._
 import mill.util.VcsVersion
@@ -31,10 +31,10 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
 
   override def publishVersion: T[String] = VcsVersion.vcsState().format(untaggedSuffix = "-SNAPSHOT")
   
-  override def scalaVersion = "3.6.4"
+  override def scalaVersion = "3.9.0"
 
   override def mvnDeps = Seq(
-    mvn"com.github.jnr:jnr-ffi:2.2.17"
+    mvn"com.github.jnr:jnr-ffi:2.3.1"
   )
 
   def islDir = moduleDir / "isl"
