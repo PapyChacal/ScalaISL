@@ -7,6 +7,8 @@ import mill.api.Task.{Source, Sources}
 
 import mill.api.ModuleRef
 
+import java.security.MessageDigest
+
 import os._
 
 object `package` extends ScalaModule with SonatypeCentralPublishModule {
@@ -37,29 +39,33 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
     mvn"com.github.jnr:jnr-ffi:2.3.1"
   )
 
-  def islDir = moduleDir / "isl"
+  val islVersion = "0.28"
+  val islArchiveName = s"isl-$islVersion.tar.gz"
+  val islUrl = s"https://libisl.sourceforge.io/$islArchiveName"
 
-  def islSources = Sources({
-    val dir = islDir
-    if(!os.exists(dir / "configure")) {
-      if(os.proc("./autogen.sh")
-        .call(cwd = dir, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
-        throw new Exception("Failed to run ISL's autogen")
-      }
+  def islArchive = Task {
+    val archive = Task.dest / islArchiveName
+    if (!os.exists(archive)) {
+      os.proc("curl", "--location", "--fail", "--silent", "--show-error", islUrl, "--output", archive)
+        .call(stdout = os.Inherit, stderr = os.Inherit)
     }
-    os.list(dir).filter(_.last != "interface")
-   }*)
+    PathRef(archive)
+  }
 
-   def islExtractorSources = Source {
-    islDir / "interface"
-   }
+  def islSources = Task {
+    val sourceDir = Task.dest / s"isl-$islVersion"
+    os.proc("tar", "-xzf", islArchive().path, "-C", Task.dest)
+      .call(stdout = os.Inherit, stderr = os.Inherit)
+    PathRef(sourceDir)
+  }
+
+  def scalaGeneratorSources = Sources(moduleDir / "isl-interface-scala")
 
   def numThreads = java.lang.Thread.activeCount()
 
   def compileISL = Task {
-    islSources()
-    val configure_path = (islDir / "configure").relativeTo(Task.dest)
-    if(os.proc(configure_path, "--prefix", Task.dest / "install")
+    val configure_path = islSources().path / "configure"
+    if(os.proc(configure_path, "--prefix", Task.dest / "install", "--with-int=imath-32")
       .call(cwd = Task.dest, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
       throw new Exception("Failed to configure ISL")
     }
@@ -70,38 +76,62 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
     PathRef(Task.dest)
   }
   
-  def ISLLib = Task {
-    os.list(compileISL().path / "install" / "lib").map(PathRef(_))
+  def nativeResources = Task {
+    val libraries = os.list(compileISL().path / "install" / "lib").filter { path =>
+      os.isFile(path) && path.last.matches("libisl\\.so\\.\\d+\\.\\d+\\.\\d+")
+    }
+    if (libraries.size != 1)
+      throw new Exception(s"Expected exactly one versioned ISL shared library, found: $libraries")
+
+    val resourceDir = Task.dest / "native"
+    os.makeDir.all(resourceDir)
+    os.copy(libraries.head, resourceDir / System.mapLibraryName("isl"))
+    Seq(PathRef(Task.dest))
   }
 
   def compileISLExtractor = Task {
-    compileISL()
-    islExtractorSources()
+    val interfaceDir = islSources().path / "interface"
+    val generatorDir = scalaGeneratorSources().head.path
+    val configurePath = interfaceDir / "configure"
+    val configuredDir = Task.dest / "configured"
+    os.makeDir.all(configuredDir)
 
-    val resourceDirPath = Task.dest
-    val configure_path = (islDir / "interface" / "configure").relativeTo(resourceDirPath)
-    if(os.proc(configure_path)
-      .call(cwd = resourceDirPath, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
-      throw new Exception("Failed to configure ISL extractor")
-    }
-    if(os.proc("make", s"-j$numThreads").call(cwd = resourceDirPath, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
-      throw new Exception("Failed to build ISL extractor")
+    if (!os.exists(interfaceDir / "generator.cc") || !os.exists(interfaceDir / "generator.h"))
+      throw new Exception(s"ISL $islVersion extractor generator sources are missing from $interfaceDir")
+    if (!os.exists(configurePath))
+      throw new Exception(s"ISL $islVersion extractor configure script is missing: $configurePath")
+
+    if(os.proc(configurePath)
+      .call(cwd = configuredDir, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
+      throw new Exception(s"Failed to configure the ISL $islVersion extractor and detect LLVM/Clang")
     }
 
-    Seq(
-      PathRef(resourceDirPath / "extract_interface")
-    )
+    val extractor = Task.dest / "extract_interface_scala"
+    if(os.proc(
+        "make", s"-j$numThreads", "-f", generatorDir / "Makefile", "scala-extractor",
+        s"ISL_INTERFACE_SOURCE=$interfaceDir",
+        s"ISL_INTERFACE_BUILD=$configuredDir",
+        s"SCALA_EXTRACTOR_SOURCE=$generatorDir",
+        s"SCALA_EXTRACTOR_OUTPUT=$extractor"
+      ).call(cwd = Task.dest, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
+      throw new Exception("Failed to build the standalone Scala ISL extractor")
+    }
+    if (!os.isFile(extractor))
+      throw new Exception(s"Standalone Scala ISL extractor was not produced: $extractor")
+
+    PathRef(extractor)
   }
 
   override def generatedSources = Task {
 
+    val islSourceDir = islSources().path
     val ISLOutput = compileISL().path
 
-    val extractor = compileISLExtractor()
+    val extractor = compileISLExtractor().path
 
     val generatedSourcePath = Task.dest / "islgen.scala"
 
-    if(os.proc(extractor,"--language", "scala-3", (islDir / "all.h").relativeTo(Task.dest), "-I" + (islDir / "include").relativeTo(Task.dest), "-I" + (ISLOutput / "include").relativeTo(Task.dest)).call(cwd = Task.dest, stdout = generatedSourcePath, stderr = os.Inherit).exitCode != 0) {
+    if(os.proc(extractor,"--language", "scala-3", islSourceDir / "all.h", "-I" + (islSourceDir / "include"), "-I" + (ISLOutput / "include")).call(cwd = Task.dest, stdout = generatedSourcePath, stderr = os.Inherit).exitCode != 0) {
       throw new Exception("Failed to extract ISL interface")
     }
 
@@ -109,6 +139,6 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
   }
 
   def resources = Task {
-    super.resources() ++ ISLLib()
+    super.resources() ++ nativeResources()
   }
 }
