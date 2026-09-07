@@ -61,47 +61,6 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
 
   def scalaGeneratorSources = Sources(moduleDir / "isl-interface-scala")
 
-  // TODO: A git submodule and patch would be way better, but I can't find isl 0.28 in git -
-  // The main repository is being blocked in the UK at time of writing...
-  def islExtractorSources = Task {
-    val sourceDir = Task.dest / "isl"
-    os.copy(islSources().path, sourceDir)
-
-    val interfaceDir = sourceDir / "interface"
-    val generatorDir = scalaGeneratorSources().head.path
-    os.copy.over(generatorDir / "scala.cc", interfaceDir / "scala.cc")
-    os.copy.over(generatorDir / "scala.h", interfaceDir / "scala.h")
-
-    val makefile = interfaceDir / "Makefile.am"
-    val makefileText = os.read(makefile)
-    val makefileNeedle = "\tplain_cpp.cc \\\n"
-    if (!makefileText.contains(makefileNeedle))
-      throw new Exception("Unable to add the Scala generator to ISL interface/Makefile.am")
-    os.write.over(makefile, makefileText.replace(
-      makefileNeedle,
-      makefileNeedle + "\tscala.h \\\n\tscala.cc \\\n"
-    ))
-
-    val extractor = interfaceDir / "extract_interface.cc"
-    val extractorText = os.read(extractor)
-    val includeNeedle = "#include \"template_cpp.h\"\n"
-    val dispatchNeedle = "\t} else if (OutputLanguage.compare(\"template-cpp\") == 0) {"
-    if (!extractorText.contains(includeNeedle) || !extractorText.contains(dispatchNeedle))
-      throw new Exception("Unable to add Scala dispatch to ISL interface/extract_interface.cc")
-    os.write.over(extractor, extractorText
-      .replace(includeNeedle, includeNeedle + "#include \"scala.h\"\n")
-      .replace(dispatchNeedle,
-        "\t} else if (OutputLanguage.compare(\"scala-3\") == 0) {\n" +
-        "\t\tgen = new scala_generator(SM, consumer.exported_types,\n" +
-        "\t\t\tconsumer.exported_functions, consumer.functions);\n" +
-        dispatchNeedle
-      ))
-
-    os.proc("autoreconf", "-i")
-      .call(cwd = interfaceDir, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit)
-    PathRef(interfaceDir)
-  }
-
   def numThreads = java.lang.Thread.activeCount()
 
   def compileISL = Task {
@@ -131,22 +90,36 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
   }
 
   def compileISLExtractor = Task {
-    compileISL()
-    val interfaceDir = islExtractorSources().path
+    val interfaceDir = islSources().path / "interface"
+    val generatorDir = scalaGeneratorSources().head.path
+    val configurePath = interfaceDir / "configure"
+    val configuredDir = Task.dest / "configured"
+    os.makeDir.all(configuredDir)
 
-    val resourceDirPath = Task.dest
-    val configure_path = interfaceDir / "configure"
-    if(os.proc(configure_path)
-      .call(cwd = resourceDirPath, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
-      throw new Exception("Failed to configure ISL extractor")
-    }
-    if(os.proc("make", s"-j$numThreads").call(cwd = resourceDirPath, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
-      throw new Exception("Failed to build ISL extractor")
+    if (!os.exists(interfaceDir / "generator.cc") || !os.exists(interfaceDir / "generator.h"))
+      throw new Exception(s"ISL $islVersion extractor generator sources are missing from $interfaceDir")
+    if (!os.exists(configurePath))
+      throw new Exception(s"ISL $islVersion extractor configure script is missing: $configurePath")
+
+    if(os.proc(configurePath)
+      .call(cwd = configuredDir, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
+      throw new Exception(s"Failed to configure the ISL $islVersion extractor and detect LLVM/Clang")
     }
 
-    Seq(
-      PathRef(resourceDirPath / "extract_interface")
-    )
+    val extractor = Task.dest / "extract_interface_scala"
+    if(os.proc(
+        "make", s"-j$numThreads", "-f", generatorDir / "Makefile", "scala-extractor",
+        s"ISL_INTERFACE_SOURCE=$interfaceDir",
+        s"ISL_INTERFACE_BUILD=$configuredDir",
+        s"SCALA_EXTRACTOR_SOURCE=$generatorDir",
+        s"SCALA_EXTRACTOR_OUTPUT=$extractor"
+      ).call(cwd = Task.dest, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
+      throw new Exception("Failed to build the standalone Scala ISL extractor")
+    }
+    if (!os.isFile(extractor))
+      throw new Exception(s"Standalone Scala ISL extractor was not produced: $extractor")
+
+    PathRef(extractor)
   }
 
   override def generatedSources = Task {
@@ -154,7 +127,7 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
     val islSourceDir = islSources().path
     val ISLOutput = compileISL().path
 
-    val extractor = compileISLExtractor()
+    val extractor = compileISLExtractor().path
 
     val generatedSourcePath = Task.dest / "islgen.scala"
 
