@@ -18,7 +18,7 @@ jobs:
           uses: actions/checkout@v4
 
         - name: Dependencies
-          run: sudo apt install -y llvm libclang-dev
+          run: sudo apt install -y autoconf automake curl libtool llvm libclang-dev
         
         - name: Build
           run: ./mill compile

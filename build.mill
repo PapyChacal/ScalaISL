@@ -1,4 +1,4 @@
-//| mill-version: 1.0.3-native
+//| mill-version: 1.1.8-native
 
 import mill._, scalalib._
 import mill.util.VcsVersion
@@ -6,6 +6,8 @@ import mill.scalalib.publish.{PomSettings, License, VersionControl, Developer}
 import mill.api.Task.{Source, Sources}
 
 import mill.api.ModuleRef
+
+import java.security.MessageDigest
 
 import os._
 
@@ -37,28 +39,73 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
     mvn"com.github.jnr:jnr-ffi:2.2.17"
   )
 
-  def islDir = moduleDir / "isl"
+  val islVersion = "0.28"
+  val islArchiveName = s"isl-$islVersion.tar.gz"
+  val islUrl = s"https://libisl.sourceforge.io/$islArchiveName"
 
-  def islSources = Sources({
-    val dir = islDir
-    if(!os.exists(dir / "configure")) {
-      if(os.proc("./autogen.sh")
-        .call(cwd = dir, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
-        throw new Exception("Failed to run ISL's autogen")
-      }
+  def islArchive = Task {
+    val archive = Task.dest / islArchiveName
+    if (!os.exists(archive)) {
+      os.proc("curl", "--location", "--fail", "--silent", "--show-error", islUrl, "--output", archive)
+        .call(stdout = os.Inherit, stderr = os.Inherit)
     }
-    os.list(dir).filter(_.last != "interface")
-   }*)
+    PathRef(archive)
+  }
 
-   def islExtractorSources = Source {
-    islDir / "interface"
-   }
+  def islSources = Task {
+    val sourceDir = Task.dest / s"isl-$islVersion"
+    os.proc("tar", "-xzf", islArchive().path, "-C", Task.dest)
+      .call(stdout = os.Inherit, stderr = os.Inherit)
+    PathRef(sourceDir)
+  }
+
+  def scalaGeneratorSources = Sources(moduleDir / "isl-interface-scala")
+
+  // TODO: A git submodule and patch would be way better, but I can't find isl 0.28 in git -
+  // The main repository is being blocked in the UK at time of writing...
+  def islExtractorSources = Task {
+    val sourceDir = Task.dest / "isl"
+    os.copy(islSources().path, sourceDir)
+
+    val interfaceDir = sourceDir / "interface"
+    val generatorDir = scalaGeneratorSources().head.path
+    os.copy.over(generatorDir / "scala.cc", interfaceDir / "scala.cc")
+    os.copy.over(generatorDir / "scala.h", interfaceDir / "scala.h")
+
+    val makefile = interfaceDir / "Makefile.am"
+    val makefileText = os.read(makefile)
+    val makefileNeedle = "\tplain_cpp.cc \\\n"
+    if (!makefileText.contains(makefileNeedle))
+      throw new Exception("Unable to add the Scala generator to ISL interface/Makefile.am")
+    os.write.over(makefile, makefileText.replace(
+      makefileNeedle,
+      makefileNeedle + "\tscala.h \\\n\tscala.cc \\\n"
+    ))
+
+    val extractor = interfaceDir / "extract_interface.cc"
+    val extractorText = os.read(extractor)
+    val includeNeedle = "#include \"template_cpp.h\"\n"
+    val dispatchNeedle = "\t} else if (OutputLanguage.compare(\"template-cpp\") == 0) {"
+    if (!extractorText.contains(includeNeedle) || !extractorText.contains(dispatchNeedle))
+      throw new Exception("Unable to add Scala dispatch to ISL interface/extract_interface.cc")
+    os.write.over(extractor, extractorText
+      .replace(includeNeedle, includeNeedle + "#include \"scala.h\"\n")
+      .replace(dispatchNeedle,
+        "\t} else if (OutputLanguage.compare(\"scala-3\") == 0) {\n" +
+        "\t\tgen = new scala_generator(SM, consumer.exported_types,\n" +
+        "\t\t\tconsumer.exported_functions, consumer.functions);\n" +
+        dispatchNeedle
+      ))
+
+    os.proc("autoreconf", "-i")
+      .call(cwd = interfaceDir, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit)
+    PathRef(interfaceDir)
+  }
 
   def numThreads = java.lang.Thread.activeCount()
 
   def compileISL = Task {
-    islSources()
-    val configure_path = (islDir / "configure").relativeTo(Task.dest)
+    val configure_path = islSources().path / "configure"
     if(os.proc(configure_path, "--prefix", Task.dest / "install")
       .call(cwd = Task.dest, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
       throw new Exception("Failed to configure ISL")
@@ -74,12 +121,20 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
     os.list(compileISL().path / "install" / "lib").map(PathRef(_))
   }
 
+  override def forkEnv = Task {
+    val libDir = (compileISL().path / "install" / "lib").toString
+    val libraryPath = sys.env.get("LD_LIBRARY_PATH")
+      .filter(_.nonEmpty)
+      .fold(libDir)(existing => s"$libDir:$existing")
+    super.forkEnv() + ("LD_LIBRARY_PATH" -> libraryPath)
+  }
+
   def compileISLExtractor = Task {
     compileISL()
-    islExtractorSources()
+    val interfaceDir = islExtractorSources().path
 
     val resourceDirPath = Task.dest
-    val configure_path = (islDir / "interface" / "configure").relativeTo(resourceDirPath)
+    val configure_path = interfaceDir / "configure"
     if(os.proc(configure_path)
       .call(cwd = resourceDirPath, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
       throw new Exception("Failed to configure ISL extractor")
@@ -95,13 +150,14 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
 
   override def generatedSources = Task {
 
+    val islSourceDir = islSources().path
     val ISLOutput = compileISL().path
 
     val extractor = compileISLExtractor()
 
     val generatedSourcePath = Task.dest / "islgen.scala"
 
-    if(os.proc(extractor,"--language", "scala-3", (islDir / "all.h").relativeTo(Task.dest), "-I" + (islDir / "include").relativeTo(Task.dest), "-I" + (ISLOutput / "include").relativeTo(Task.dest)).call(cwd = Task.dest, stdout = generatedSourcePath, stderr = os.Inherit).exitCode != 0) {
+    if(os.proc(extractor,"--language", "scala-3", islSourceDir / "all.h", "-I" + (islSourceDir / "include"), "-I" + (ISLOutput / "include")).call(cwd = Task.dest, stdout = generatedSourcePath, stderr = os.Inherit).exitCode != 0) {
       throw new Exception("Failed to extract ISL interface")
     }
 

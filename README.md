@@ -27,6 +27,11 @@ https://github.com/PapyChacal/ScalaISL/blob/main/src/main/scala-3/isl.scala
 
 ### Compile
 
+The build downloads the official ISL 0.28 release archive from
+[`libisl.sourceforge.io`](https://libisl.sourceforge.io/isl-0.28.tar.gz),
+verifies its SHA-256 checksum, and builds it locally. The Scala-specific
+interface generator remains in this repository under `isl-interface-scala/`.
+
 ```bash
 ./mill compile
 ```
