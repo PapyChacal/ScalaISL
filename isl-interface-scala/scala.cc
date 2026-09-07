@@ -366,8 +366,7 @@ void scala_generator::generate()
        << "class File(val p: Pointer) extends AnyVal {}" << std::endl
        << "given [C] => Conversion[C, Pointer] => Conversion[AbstractReference[C], PointerByReference] = (a : AbstractReference[C]) => new PointerByReference(a.getValue())" << std::endl;
 
-    os << "private[isl] val lib = LibraryLoader.create(classOf[ISLLib])" << std::endl;
-    os << "  " << ".load(\"isl\")" << std::endl << std::endl;
+    os << "private[isl] val lib = NativeISL.load" << std::endl << std::endl;
     os << "private[isl] trait ISLLib:" << std::endl;
     for (const auto& f : functions_by_name) {
         const auto& name = f.first;

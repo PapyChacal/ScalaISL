@@ -106,7 +106,7 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
 
   def compileISL = Task {
     val configure_path = islSources().path / "configure"
-    if(os.proc(configure_path, "--prefix", Task.dest / "install")
+    if(os.proc(configure_path, "--prefix", Task.dest / "install", "--with-int=imath-32")
       .call(cwd = Task.dest, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
       throw new Exception("Failed to configure ISL")
     }
@@ -117,16 +117,17 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
     PathRef(Task.dest)
   }
   
-  def ISLLib = Task {
-    os.list(compileISL().path / "install" / "lib").map(PathRef(_))
-  }
+  def nativeResources = Task {
+    val libraries = os.list(compileISL().path / "install" / "lib").filter { path =>
+      os.isFile(path) && path.last.matches("libisl\\.so\\.\\d+\\.\\d+\\.\\d+")
+    }
+    if (libraries.size != 1)
+      throw new Exception(s"Expected exactly one versioned ISL shared library, found: $libraries")
 
-  override def forkEnv = Task {
-    val libDir = (compileISL().path / "install" / "lib").toString
-    val libraryPath = sys.env.get("LD_LIBRARY_PATH")
-      .filter(_.nonEmpty)
-      .fold(libDir)(existing => s"$libDir:$existing")
-    super.forkEnv() + ("LD_LIBRARY_PATH" -> libraryPath)
+    val resourceDir = Task.dest / "native"
+    os.makeDir.all(resourceDir)
+    os.copy(libraries.head, resourceDir / System.mapLibraryName("isl"))
+    Seq(PathRef(Task.dest))
   }
 
   def compileISLExtractor = Task {
@@ -165,6 +166,6 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
   }
 
   def resources = Task {
-    super.resources() ++ ISLLib()
+    super.resources() ++ nativeResources()
   }
 }

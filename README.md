@@ -31,6 +31,9 @@ The build downloads the official ISL 0.28 release archive from
 [`libisl.sourceforge.io`](https://libisl.sourceforge.io/isl-0.28.tar.gz),
 verifies its SHA-256 checksum, and builds it locally. The Scala-specific
 interface generator remains in this repository under `isl-interface-scala/`.
+The currently published artifact bundles a Linux x86-64 native library using
+ISL's `imath-32` backend, so consumers do not need a system ISL or GMP
+installation.
 
 ```bash
 ./mill compile
