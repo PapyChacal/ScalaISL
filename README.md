@@ -10,18 +10,25 @@ This project is in an **experimental state**, is **not intended for serious or p
 
 - Scala types for core ISL constructs: `isl_set`, `isl_map`, etc.
 - Simple method syntax to call most functions.
-- Basic contextual argument usage for `isl_context`.
-- Built using ISL's interface extractor and [`jnr-ffi`](https://github.com/jnr/jnr-ffi)
+- Explicit, non-throwing mappings for `isl_bool`, `isl_stat`, `isl_size`, and nullable object results.
+- Ownership-aware `AutoCloseable` wrappers with a `Cleaner` fallback.
+- Generated Scaladoc recovered from ISL headers and implementation files.
+- A Scala 3/libclang binding generator and a [`jnr-ffi`](https://github.com/jnr/jnr-ffi) JVM runtime.
 
-## What is not
+## Current limitations
 
-- Documentation
-- Tests
-- Distribution beyond linux-x86
+- The public mapping report still identifies declarations that need bespoke
+  wrappers, such as by-value `isl_maybe_*` structs and consuming types without
+  a native copy operation.
+- Distribution beyond linux-x86 has not been validated.
 
 ## Quick Example
 
-https://github.com/PapyChacal/ScalaISL/blob/main/src/main/scala-3/isl.scala
+See [`src/main/scala-3/Example.scala`](src/main/scala-3/Example.scala).
+
+The public API preserves ISL failures as values. Constructors return `Option`,
+predicates return `IslBool`, status operations return `IslStat`, and sizes use
+the opaque `IslSize` type.
 
 ## How to
 
@@ -43,11 +50,25 @@ installation.
 ```
 
 ### Run example code
-in `src/main/scala-3/isl.scala`
 
 ```bash
-./mill run
+./mill runMain com.github.papychacal.isl.Example
 ```
+
+### Check the generator fixtures
+
+```bash
+./mill bindgen.check
+```
+
+### Build Scaladoc
+
+```bash
+./mill docJar
+```
+
+Generated Scala sources live only in Mill task output. They are regenerated
+from the vendored ISL sources and are not committed.
 
 ### Publish locally
 to build and use as a dependency locally, e.g. try it out on non-linux and/or non-x86.
