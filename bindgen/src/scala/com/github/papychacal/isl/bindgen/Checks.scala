@@ -24,6 +24,9 @@ object Checks:
     assert(combined.contains("Construct a fixture from a textual description."))
     assert(combined.contains("trait Callback"))
     assert(combined.contains("final class Fixture"))
+    assert(combined.contains("CallbackRegistration[Option[Fixture]]"))
+    assert(combined.contains("enum IslBool"))
+    assert(combined.contains("opaque type IslSize"))
     assert(!rendered.diagnostics.exists(_.startsWith("unsupported raw declaration")))
 
     val formatted = ScaladocFormatter.format(Seq("first paragraph\n\ncode */ fragment"))

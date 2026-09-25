@@ -19,6 +19,10 @@ __isl_constructor __isl_give isl_fixture *isl_fixture_read_from_str(
 __isl_export int isl_fixture_foreach(__isl_keep isl_fixture *fixture,
 	isl_fixture_callback callback, void *user);
 
+/** Install a callback that remains reachable from the returned object. */
+__isl_export __isl_give isl_fixture *isl_ast_build_set_fixture(
+	__isl_take isl_fixture *fixture, isl_fixture_callback callback, void *user);
+
 __isl_export __isl_give isl_fixture *isl_fixture_coalesce(__isl_take isl_fixture *fixture);
 
 __isl_export __isl_give isl_fixture *isl_fixture_copy(__isl_keep isl_fixture *fixture);
