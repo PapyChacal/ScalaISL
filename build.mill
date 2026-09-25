@@ -3,15 +3,30 @@
 import mill._, scalalib._
 import mill.util.VcsVersion
 import mill.scalalib.publish.{PomSettings, License, VersionControl, Developer}
-import mill.api.Task.{Source, Sources}
-
-import mill.api.ModuleRef
-
-import java.security.MessageDigest
 
 import os._
 
 object `package` extends ScalaModule with SonatypeCentralPublishModule {
+
+  object bindgen extends ScalaModule {
+    override def scalaVersion = "3.9.0"
+    override def mainClass = Some("com.github.papychacal.isl.bindgen.Main")
+    override def forkArgs = Seq("-Xint")
+
+    override def mvnDeps = Seq(
+      mvn"org.bytedeco:llvm-platform:21.1.8-1.5.13"
+    )
+
+    def check() = Task.Command {
+      val classpath = runClasspath().map(_.path).mkString(java.io.File.pathSeparator)
+      os.proc(
+        "java", "-Xint", "-cp", classpath,
+        "com.github.papychacal.isl.bindgen.Checks",
+        moduleDir / os.up
+      ).call(cwd = moduleDir / os.up, stdout = os.Inherit, stderr = os.Inherit)
+      ()
+    }
+  }
 
   override def artifactName = "scalaisl"
 
@@ -59,8 +74,6 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
     PathRef(sourceDir)
   }
 
-  def scalaGeneratorSources = Sources(moduleDir / "isl-interface-scala")
-
   def numThreads = java.lang.Thread.activeCount()
 
   def compileISL = Task {
@@ -89,53 +102,28 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
     Seq(PathRef(Task.dest))
   }
 
-  def compileISLExtractor = Task {
-    val interfaceDir = islSources().path / "interface"
-    val generatorDir = scalaGeneratorSources().head.path
-    val configurePath = interfaceDir / "configure"
-    val configuredDir = Task.dest / "configured"
-    os.makeDir.all(configuredDir)
-
-    if (!os.exists(interfaceDir / "generator.cc") || !os.exists(interfaceDir / "generator.h"))
-      throw new Exception(s"ISL $islVersion extractor generator sources are missing from $interfaceDir")
-    if (!os.exists(configurePath))
-      throw new Exception(s"ISL $islVersion extractor configure script is missing: $configurePath")
-
-    if(os.proc(configurePath)
-      .call(cwd = configuredDir, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
-      throw new Exception(s"Failed to configure the ISL $islVersion extractor and detect LLVM/Clang")
-    }
-
-    val extractor = Task.dest / "extract_interface_scala"
-    if(os.proc(
-        "make", s"-j$numThreads", "-f", generatorDir / "Makefile", "scala-extractor",
-        s"ISL_INTERFACE_SOURCE=$interfaceDir",
-        s"ISL_INTERFACE_BUILD=$configuredDir",
-        s"SCALA_EXTRACTOR_SOURCE=$generatorDir",
-        s"SCALA_EXTRACTOR_OUTPUT=$extractor"
-      ).call(cwd = Task.dest, propagateEnv = true, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
-      throw new Exception("Failed to build the standalone Scala ISL extractor")
-    }
-    if (!os.isFile(extractor))
-      throw new Exception(s"Standalone Scala ISL extractor was not produced: $extractor")
-
-    PathRef(extractor)
-  }
-
   override def generatedSources = Task {
-
     val islSourceDir = islSources().path
-    val ISLOutput = compileISL().path
-
-    val extractor = compileISLExtractor().path
-
-    val generatedSourcePath = Task.dest / "islgen.scala"
-
-    if(os.proc(extractor,"--language", "scala-3", islSourceDir / "all.h", "-I" + (islSourceDir / "include"), "-I" + (ISLOutput / "include")).call(cwd = Task.dest, stdout = generatedSourcePath, stderr = os.Inherit).exitCode != 0) {
-      throw new Exception("Failed to extract ISL interface")
+    val islOutput = compileISL().path
+    val output = Task.dest / "scala"
+    val classpath = bindgen.runClasspath().map(_.path).mkString(java.io.File.pathSeparator)
+    val clangResourceInclude = os.Path(
+      os.proc("clang", "-print-resource-dir").call(cwd = moduleDir).out.text().trim,
+      os.root
+    ) / "include"
+    val command = os.proc(
+      "java", "-Xint", "-cp", classpath,
+      "com.github.papychacal.isl.bindgen.Main",
+      moduleDir, output,
+      islSourceDir / "include",
+      islOutput / "include",
+      islSourceDir,
+      clangResourceInclude
+    )
+    if(command.call(cwd = moduleDir, stdout = os.Inherit, stderr = os.Inherit).exitCode != 0) {
+      throw new Exception("Failed to generate ISL bindings")
     }
-
-    super.generatedSources() :+ PathRef(generatedSourcePath)
+    super.generatedSources() :+ PathRef(output)
   }
 
   def resources = Task {
