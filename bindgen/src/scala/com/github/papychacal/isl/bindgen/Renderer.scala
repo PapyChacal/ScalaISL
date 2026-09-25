@@ -11,7 +11,7 @@ final case class RenderingResult(files: Vector[RenderedFile], diagnostics: Vecto
 object ScalaRenderer:
   private final case class Callback(name: String, cType: CType)
 
-  def render(model: IslModel, projectRoot: Path): RenderingResult =
+  def render(model: IslModel): RenderingResult =
     val diagnostics = mutable.ArrayBuffer.empty[String]
     val callbacks = collectCallbacks(model)
     val callbackNames = callbacks.map(callback => callback.cType.canonical -> callback.name).toMap
@@ -26,8 +26,8 @@ object ScalaRenderer:
       group.map(_._1.name -> index)
     }.toMap
 
-    val unsafe = renderUnsafe(model, rawFunctions, callbacks, functionParts, projectRoot)
-    val api = renderApi(model, rawFunctions.map(_._1), callbackNames, functionParts, diagnostics, projectRoot)
+    val unsafe = renderUnsafe(rawFunctions, callbacks, functionParts)
+    val api = renderApi(model, rawFunctions.map(_._1), callbackNames, functionParts, diagnostics)
     RenderingResult(
       Vector(RenderedFile("unsafe.scala", unsafe), RenderedFile("api.scala", api)),
       diagnostics.toVector.sorted
@@ -49,11 +49,9 @@ object ScalaRenderer:
       .map((cType, index) => Callback(s"Callback${index + 1}", cType))
 
   private def renderUnsafe(
-      model: IslModel,
       functions: Vector[(FunctionDecl, String)],
       callbacks: Vector[Callback],
-      functionParts: Map[String, Int],
-      projectRoot: Path
+      functionParts: Map[String, Int]
   ): String =
     val callbackText = callbacks.map { callback =>
       val result = rawType(callback.cType.callbackResult.get, Map.empty).getOrElse("Unit")
@@ -72,26 +70,15 @@ object ScalaRenderer:
       s"trait ISLLibrary$part:\n$methods"
     }.mkString("\n\n")
     val instances = functionParts.values.toSet.toVector.sorted.map { part =>
-      s"  lazy val part$part: ISLLibrary$part = LibraryLoader.create(classOf[ISLLibrary$part]).load(NativeLibraryResource.path)"
+      s"  lazy val part$part: ISLLibrary$part = NativeLibrary.load(classOf[ISLLibrary$part])"
     }.mkString("\n")
     s"""package com.github.papychacal.isl.unsafe
        |
-       |import java.nio.file.{Files, StandardCopyOption}
-       |import jnr.ffi.{LibraryLoader, Pointer}
+       |import jnr.ffi.Pointer
        |import jnr.ffi.annotations.Delegate
        |
        |$callbackText
        |$libraries
-       |
-       |private object NativeLibraryResource:
-       |  lazy val path: String =
-       |    val stream = Option(getClass.getResourceAsStream("/libisl.so"))
-       |      .getOrElse(throw UnsatisfiedLinkError("bundled native library /libisl.so was not found"))
-       |    val file = Files.createTempFile("scalaisl-", "-libisl.so")
-       |    try Files.copy(stream, file, StandardCopyOption.REPLACE_EXISTING)
-       |    finally stream.close()
-       |    file.toFile.deleteOnExit()
-       |    file.toAbsolutePath.toString
        |
        |object ISLLibrary:
        |$instances
@@ -125,8 +112,7 @@ object ScalaRenderer:
       functions: Vector[FunctionDecl],
       callbackNames: Map[String, String],
       functionParts: Map[String, Int],
-      diagnostics: mutable.ArrayBuffer[String],
-      projectRoot: Path
+      diagnostics: mutable.ArrayBuffer[String]
   ): String =
     val objectTypes = model.objectTypes.toVector.sorted
     val freeFunctions = functions.filter(f => f.name.endsWith("_free") && f.parameters.size == 1)
@@ -134,7 +120,6 @@ object ScalaRenderer:
     val copyFunctions = functions.filter(f => f.name.endsWith("_copy") && f.parameters.size == 1)
       .flatMap(f => Model.objectType(f.parameters.head.cType).map(_ -> f)).toMap
 
-    val specialEnums = renderResultConventions
     val enums = model.enums.filterNot(e => Set("isl_bool", "isl_stat").contains(e.name))
       .filter(_.values.nonEmpty).map(renderEnum).mkString("\n")
 
@@ -142,10 +127,10 @@ object ScalaRenderer:
       val className = scalaTypeName(objectType)
       val instanceCandidates = functions.filter(f => f.parameters.headOption.flatMap(p => Model.objectType(p.cType)).contains(objectType))
         .filterNot(f => f.name.endsWith("_free") || f.name.endsWith("_copy"))
-      val instanceMethods = renderPublicMethods(instanceCandidates, Some(objectType), hasReceiver = true, model, callbackNames, functionParts, copyFunctions, diagnostics, projectRoot)
+      val instanceMethods = renderPublicMethods(instanceCandidates, Some(objectType), hasReceiver = true, model, callbackNames, functionParts, copyFunctions, diagnostics)
       val companionCandidates = functions.filter(f => Model.objectType(f.result).contains(objectType))
         .filterNot(f => f.parameters.headOption.flatMap(p => Model.objectType(p.cType)).contains(objectType))
-      val companionMethods = renderPublicMethods(companionCandidates, Some(objectType), hasReceiver = false, model, callbackNames, functionParts, copyFunctions, diagnostics, projectRoot)
+      val companionMethods = renderPublicMethods(companionCandidates, Some(objectType), hasReceiver = false, model, callbackNames, functionParts, copyFunctions, diagnostics)
       val free = freeFunctions.get(objectType).map(f => s"pointer => ${nativeLibrary(f.name, functionParts)}.${scalaIdentifier(f.name)}(pointer)")
         .getOrElse("_ => ()")
       val copyMethod = copyFunctions.get(objectType).map { function =>
@@ -153,9 +138,11 @@ object ScalaRenderer:
            |  def copy(): $className = $className.owned(${nativeLibrary(function.name, functionParts)}.${scalaIdentifier(function.name)}(handle.pointer))
            |""".stripMargin
       }.getOrElse("")
-      s"""final class $className private[isl] (private[isl] val handle: NativeHandle):
-         |  private[isl] def pointer: Pointer = handle.pointer
-         |$copyMethod$instanceMethods
+      val classBody = copyMethod + instanceMethods
+      val classDefinition =
+        val declaration = s"final class $className private[isl] (private[isl] val handle: NativeHandle)"
+        if classBody.isEmpty then declaration else s"$declaration:\n$classBody"
+      s"""$classDefinition
          |
          |object $className:
          |  private[isl] def owned(pointer: Pointer): $className = new $className(NativeHandle.owned(pointer, $free))
@@ -169,35 +156,14 @@ object ScalaRenderer:
         functions.filter(f => Model.objectType(f.result).contains(objectType)).map(_.name)
     }.toSet
     val globals = renderPublicMethods(functions.filterNot(f => objectFunctionNames.contains(f.name)), None, hasReceiver = false, model,
-      callbackNames, functionParts, copyFunctions, diagnostics, projectRoot)
+      callbackNames, functionParts, copyFunctions, diagnostics)
 
     s"""package com.github.papychacal.isl
        |
-       |import java.lang.ref.Cleaner
        |import jnr.ffi.Pointer
        |import com.github.papychacal.isl.{unsafe => native}
        |
-       |$specialEnums
        |$enums
-       |private final class NativeState(pointer: Pointer, release: Pointer => Unit) extends Runnable:
-       |  override def run(): Unit = release(pointer)
-       |
-       |private[isl] final class NativeHandle private (val pointer: Pointer)
-       |
-       |private[isl] object NativeHandle:
-       |  private val cleaner = Cleaner.create()
-       |  def owned(pointer: Pointer, release: Pointer => Unit): NativeHandle =
-       |    val handle = NativeHandle(pointer)
-       |    cleaner.register(handle, NativeState(pointer, release))
-       |    handle
-       |  def borrowed(pointer: Pointer): NativeHandle = NativeHandle(pointer)
-       |
-       |final class CallbackRegistration[+A] private[isl] (val value: A, private val retained: List[AnyRef])
-       |
-       |private[isl] object CallbackRegistration:
-       |  def apply[A](value: A, retained: List[AnyRef]): CallbackRegistration[A] =
-       |    new CallbackRegistration(value, retained)
-       |
        |$classes
        |object ISL:
        |$globals
@@ -211,11 +177,10 @@ object ScalaRenderer:
       callbackNames: Map[String, String],
       functionParts: Map[String, Int],
       copyFunctions: Map[String, FunctionDecl],
-      diagnostics: mutable.ArrayBuffer[String],
-      projectRoot: Path
+      diagnostics: mutable.ArrayBuffer[String]
   ): String =
     val rendered = functions.flatMap { function =>
-      renderPublicMethod(function, owner, hasReceiver, model, callbackNames, functionParts, copyFunctions, projectRoot) match
+      renderPublicMethod(function, owner, hasReceiver, model, callbackNames, functionParts, copyFunctions) match
         case Right(method) => Some(method)
         case Left(reason) =>
           diagnostics += s"unsupported Scala API declaration ${function.signature}: $reason"
@@ -235,8 +200,7 @@ object ScalaRenderer:
       model: IslModel,
       callbackNames: Map[String, String],
       functionParts: Map[String, Int],
-      copyFunctions: Map[String, FunctionDecl],
-      projectRoot: Path
+      copyFunctions: Map[String, FunctionDecl]
   ): Either[String, (String, String, String)] =
     if function.result.isCallback then
       return Left("returning a native callback requires an explicit lifetime policy")
@@ -390,40 +354,6 @@ object ScalaRenderer:
           case value if integer32(value) => Right("Int")
           case value if integer64(value) => Right("Long")
           case value => Left(s"unsupported Scala type '$value'")
-
-  private def renderResultConventions: String =
-    """enum IslBool(val nativeValue: Int):
-      |  case Error extends IslBool(-1)
-      |  case False extends IslBool(0)
-      |  case True extends IslBool(1)
-      |
-      |object IslBool:
-      |  def fromNative(value: Int): IslBool = value match
-      |    case -1 => Error
-      |    case 0 => False
-      |    case 1 => True
-      |    case other => throw IllegalArgumentException(s"invalid isl_bool ABI value: $other")
-      |
-      |enum IslStat(val nativeValue: Int):
-      |  case Error extends IslStat(-1)
-      |  case Ok extends IslStat(0)
-      |
-      |object IslStat:
-      |  def fromNative(value: Int): IslStat = value match
-      |    case -1 => Error
-      |    case 0 => Ok
-      |    case other => throw IllegalArgumentException(s"invalid isl_stat ABI value: $other")
-      |
-      |opaque type IslSize = Long
-      |
-      |object IslSize:
-      |  val Error: IslSize = -1L
-      |  def apply(raw: Long): IslSize = raw
-      |  extension (size: IslSize)
-      |    def raw: Long = size
-      |    def isError: Boolean = size == Error
-      |    def toLongOption: Option[Long] = Option.unless(isError)(size)
-      |""".stripMargin
 
   private def renderEnum(enumDecl: EnumDecl): String =
     val typeName = scalaTypeName(enumDecl.name)

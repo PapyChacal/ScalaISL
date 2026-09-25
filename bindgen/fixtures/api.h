@@ -2,6 +2,7 @@
 #define BINDGEN_FIXTURE_API_H
 
 typedef struct isl_fixture isl_fixture;
+typedef struct isl_empty isl_empty;
 
 enum isl_fixture_mode {
 	isl_fixture_mode_first = 0,
@@ -27,5 +28,7 @@ __isl_export __isl_give isl_fixture *isl_fixture_coalesce(__isl_take isl_fixture
 
 __isl_export __isl_give isl_fixture *isl_fixture_copy(__isl_keep isl_fixture *fixture);
 __isl_export void isl_fixture_free(__isl_take isl_fixture *fixture);
+
+__isl_export void isl_empty_free(__isl_take isl_empty *empty);
 
 #endif

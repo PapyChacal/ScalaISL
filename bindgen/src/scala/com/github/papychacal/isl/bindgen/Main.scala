@@ -17,7 +17,7 @@ object Main:
     System.err.println("extracting implementation documentation")
     val documentation = SourceDocumentation.enrich(extracted, root, root.resolve("isl"), includes)
     System.err.println("rendering Scala sources")
-    val rendered = ScalaRenderer.render(documentation.model, root)
+    val rendered = ScalaRenderer.render(documentation.model)
     val parseDiagnostics = extracted.diagnostics.filter(_.severity >= 3).map(d => s"clang: ${d.message}")
     val result = rendered.copy(diagnostics =
       (rendered.diagnostics ++ documentation.ambiguities ++ parseDiagnostics ++
