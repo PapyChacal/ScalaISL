@@ -114,7 +114,7 @@ object `package` extends ScalaModule with SonatypeCentralPublishModule {
     val command = os.proc(
       "java", "-Xint", "-cp", classpath,
       "com.github.papychacal.isl.bindgen.Main",
-      moduleDir, output,
+      moduleDir, output, islSourceDir,
       islSourceDir / "include",
       islOutput / "include",
       islSourceDir,

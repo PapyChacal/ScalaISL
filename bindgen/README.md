@@ -29,13 +29,12 @@ JDK 25 while repeatedly traversing large ISL translation units.
 
 ## Inventory baseline
 
-The current ISL headers contain 2,851 `isl_*` function declarations. The new
-raw layer maps 2,849 of them and reports the two by-value `isl_maybe_*`
-structures it cannot yet represent. The legacy renderer explicitly skipped
-five symbols in `isl/interface/scala.cc`; three of those (`isl_ctx_parse_options`,
-`isl_mat_left_hermite`, and `isl_args_parse`) are present in the new raw layer.
-The legacy source remains in the vendored ISL tree for reference, but Mill no
-longer compiles or invokes it.
+The ISL 0.28 headers contain 2,868 `isl_*` function declarations. The new raw
+layer maps 2,866 of them and reports the two by-value `isl_maybe_*`
+structures it cannot yet represent. The previous renderer explicitly skipped
+five symbols; three of those (`isl_ctx_parse_options`, `isl_mat_left_hermite`,
+and `isl_args_parse`) are present in the new raw layer. The legacy extractor has
+been removed.
 
 ## Owned and borrowed wrappers
 
