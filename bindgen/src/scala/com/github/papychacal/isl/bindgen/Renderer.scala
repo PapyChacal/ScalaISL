@@ -153,9 +153,8 @@ object ScalaRenderer:
            |  def copy(): $className = $className.owned(${nativeLibrary(function.name, functionParts)}.${scalaIdentifier(function.name)}(handle.pointer))
            |""".stripMargin
       }.getOrElse("")
-      s"""final class $className private[isl] (private[isl] val handle: NativeHandle) extends AutoCloseable:
-         |  override def close(): Unit = handle.close()
-         |  def isClosed: Boolean = handle.isClosed
+      s"""final class $className private[isl] (private[isl] val handle: NativeHandle):
+         |  private[isl] def pointer: Pointer = handle.pointer
          |$copyMethod$instanceMethods
          |
          |object $className:
@@ -175,45 +174,25 @@ object ScalaRenderer:
     s"""package com.github.papychacal.isl
        |
        |import java.lang.ref.Cleaner
-       |import java.util.concurrent.atomic.AtomicReference
        |import jnr.ffi.Pointer
        |import com.github.papychacal.isl.{unsafe => native}
        |
        |$specialEnums
        |$enums
-       |private final class NativeState(reference: AtomicReference[Pointer], release: Pointer => Unit) extends Runnable:
-       |  override def run(): Unit =
-       |    val pointer = reference.getAndSet(null)
-       |    if pointer != null then release(pointer)
+       |private final class NativeState(pointer: Pointer, release: Pointer => Unit) extends Runnable:
+       |  override def run(): Unit = release(pointer)
        |
-       |private[isl] final class NativeHandle private (pointerValue: Pointer, release: Pointer => Unit, clean: Boolean) extends AutoCloseable:
-       |  private val reference = new AtomicReference[Pointer](pointerValue)
-       |  private val cleanable = if clean then NativeHandle.cleaner.register(this, NativeState(reference, release)) else null
-       |  def pointer: Pointer =
-       |    val value = reference.get()
-       |    if value == null then throw IllegalStateException("native ISL object is closed")
-       |    value
-       |  def isClosed: Boolean =
-       |    val value = reference.get()
-       |    value == null
-       |  override def close(): Unit =
-       |    if cleanable != null then cleanable.clean() else reference.set(null)
+       |private[isl] final class NativeHandle private (val pointer: Pointer)
        |
        |private[isl] object NativeHandle:
        |  private val cleaner = Cleaner.create()
-       |  def owned(pointer: Pointer, release: Pointer => Unit): NativeHandle = NativeHandle(pointer, release, clean = true)
-       |  def borrowed(pointer: Pointer): NativeHandle = NativeHandle(pointer, _ => (), clean = false)
+       |  def owned(pointer: Pointer, release: Pointer => Unit): NativeHandle =
+       |    val handle = NativeHandle(pointer)
+       |    cleaner.register(handle, NativeState(pointer, release))
+       |    handle
+       |  def borrowed(pointer: Pointer): NativeHandle = NativeHandle(pointer)
        |
-       |final class CallbackRegistration[+A] private[isl] (val value: A, private var retained: List[AnyRef]) extends AutoCloseable:
-       |  override def close(): Unit =
-       |    value match
-       |      case closeable: AutoCloseable => closeable.close()
-       |      case optional: Option[?] => optional.foreach {
-       |        case closeable: AutoCloseable => closeable.close()
-       |        case _ => ()
-       |      }
-       |      case _ => ()
-       |    retained = Nil
+       |final class CallbackRegistration[+A] private[isl] (val value: A, private val retained: List[AnyRef])
        |
        |private[isl] object CallbackRegistration:
        |  def apply[A](value: A, retained: List[AnyRef]): CallbackRegistration[A] =
@@ -297,7 +276,7 @@ object ScalaRenderer:
       val parameters = visibleParameters.zip(parameterTypes).map { (parameter, tpe) => s"${scalaIdentifier(parameter.name)}: $tpe" }.mkString(", ")
       val finalResultType = if persistent then s"CallbackRegistration[$resultType]" else resultType
       val signature = s"$methodName(${parameterTypes.mkString(",")}):$finalResultType"
-      val callbackDoc = Option.when(persistent)("The returned registration retains native callback objects; close it when the configured native object is no longer used.").toSeq
+      val callbackDoc = Option.when(persistent)("The returned registration retains native callback objects while it remains reachable.").toSeq
       val docs = documentation(function, extra = callbackDoc)
       val method =
         if persistent then
@@ -341,8 +320,7 @@ object ScalaRenderer:
           if ownedBindings.isEmpty then convertedResult
           else
             val bindings = ownedBindings.map(_._3).mkString("; ")
-            val closing = ownedBindings.reverse.map(binding => s"${binding._2}.close()").mkString("; ")
-            s"{ $bindings; try $convertedResult finally { $closing } }"
+            s"{ $bindings; $convertedResult }"
         Right(s"new native.$callbackName { def invoke(${argumentTypes.zipWithIndex.map((t, i) => s"arg${i + 1}: $t").mkString(", ")}): ${rawType(parameter.cType.callbackResult.get, Map.empty).getOrElse("Unit")} = $body }")
       case None =>
         normalize(parameter.cType.canonical) match

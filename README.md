@@ -11,7 +11,7 @@ This project is in an **experimental state**, is **not intended for serious or p
 - Scala types for core ISL constructs: `isl_set`, `isl_map`, etc.
 - Simple method syntax to call most functions.
 - Explicit, non-throwing mappings for `isl_bool`, `isl_stat`, `isl_size`, and nullable object results.
-- Ownership-aware `AutoCloseable` wrappers with a `Cleaner` fallback.
+- Ownership-aware wrappers with best-effort `Cleaner` release.
 - Generated Scaladoc recovered from ISL headers and implementation files.
 - A Scala 3/libclang binding generator and a [`jnr-ffi`](https://github.com/jnr/jnr-ffi) JVM runtime.
 

@@ -44,16 +44,16 @@ native objects or eventually frees an object that ISL still owns.
 
 The public wrapper classes therefore share a small internal `NativeHandle`:
 
-- an **owned** handle invokes the corresponding `isl_*_free` function exactly
-  once when closed, with a `Cleaner` as a fallback;
-- a **borrowed** handle never frees its pointer;
+- an **owned** handle registers the corresponding `isl_*_free` function with a
+  JVM `Cleaner`;
+- a **borrowed** handle does not register any cleanup action;
 - a `__isl_take` argument is copied when ISL provides a copy function, so a
   Scala method call does not unexpectedly consume its receiver or argument.
 
 This distinction is intentionally internal—users see the same Scala wrapper
-type. It is primarily resource and use-after-free protection; it is not a full
-static borrow checker. In particular, a borrowed result must not outlive the
-native object from which it was obtained. Short-lived examples can appear to
-work without this layer because the process exits before leaks matter and many
-ISL objects are reference-counted, but long-running JVM applications cannot
-rely on that behavior.
+type. The public API deliberately does not implement `AutoCloseable` or promise
+deterministic native-resource release. Cleaner execution depends on garbage
+collection, can be delayed indefinitely, and is not guaranteed at JVM exit.
+This policy is intended for the project's short-lived, experimental workloads.
+It is not a static borrow checker: a borrowed result must still not outlive the
+native object from which it was obtained.
