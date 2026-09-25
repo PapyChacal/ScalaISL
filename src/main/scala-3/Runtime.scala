@@ -35,9 +35,6 @@ object IslSize:
     def isError: Boolean = size == Error
     def toLongOption: Option[Long] = Option.unless(isError)(size)
 
-private final class NativeState(pointer: Pointer, release: Pointer => Unit) extends Runnable:
-  override def run(): Unit = release(pointer)
-
 private[isl] final class NativeHandle private (val pointer: Pointer)
 
 private[isl] object NativeHandle:
@@ -45,7 +42,7 @@ private[isl] object NativeHandle:
 
   def owned(pointer: Pointer, release: Pointer => Unit): NativeHandle =
     val handle = NativeHandle(pointer)
-    cleaner.register(handle, NativeState(pointer, release))
+    cleaner.register(handle, () => release(pointer))
     handle
 
   def borrowed(pointer: Pointer): NativeHandle = NativeHandle(pointer)
