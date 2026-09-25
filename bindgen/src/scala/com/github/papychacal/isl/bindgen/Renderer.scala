@@ -66,21 +66,32 @@ object ScalaRenderer:
     }.mkString("\n")
     val libraries = functions.groupBy((function, _) => functionParts(function.name)).toVector.sortBy(_._1).map { (part, declarations) =>
       val methods = declarations.map { (function, signature) =>
-        val docs = documentation(function, projectRoot, lowLevel = true)
+        val docs = documentation(function)
         s"$docs  $signature"
       }.mkString("\n\n")
       s"trait ISLLibrary$part:\n$methods"
     }.mkString("\n\n")
     val instances = functionParts.values.toSet.toVector.sorted.map { part =>
-      s"  lazy val part$part: ISLLibrary$part = LibraryLoader.create(classOf[ISLLibrary$part]).load(\"isl\")"
+      s"  lazy val part$part: ISLLibrary$part = LibraryLoader.create(classOf[ISLLibrary$part]).load(NativeLibraryResource.path)"
     }.mkString("\n")
     s"""package com.github.papychacal.isl.unsafe
        |
+       |import java.nio.file.{Files, StandardCopyOption}
        |import jnr.ffi.{LibraryLoader, Pointer}
        |import jnr.ffi.annotations.Delegate
        |
        |$callbackText
        |$libraries
+       |
+       |private object NativeLibraryResource:
+       |  lazy val path: String =
+       |    val stream = Option(getClass.getResourceAsStream("/libisl.so"))
+       |      .getOrElse(throw UnsatisfiedLinkError("bundled native library /libisl.so was not found"))
+       |    val file = Files.createTempFile("scalaisl-", "-libisl.so")
+       |    try Files.copy(stream, file, StandardCopyOption.REPLACE_EXISTING)
+       |    finally stream.close()
+       |    file.toFile.deleteOnExit()
+       |    file.toAbsolutePath.toString
        |
        |object ISLLibrary:
        |$instances
@@ -287,7 +298,7 @@ object ScalaRenderer:
       val finalResultType = if persistent then s"CallbackRegistration[$resultType]" else resultType
       val signature = s"$methodName(${parameterTypes.mkString(",")}):$finalResultType"
       val callbackDoc = Option.when(persistent)("The returned registration retains native callback objects; close it when the configured native object is no longer used.").toSeq
-      val docs = documentation(function, projectRoot, lowLevel = false, extra = callbackDoc)
+      val docs = documentation(function, extra = callbackDoc)
       val method =
         if persistent then
           val bindings = callbackBindings.map((_, variable, expression) => s"    val $variable = $expression").mkString("\n")
@@ -457,16 +468,11 @@ object ScalaRenderer:
        |    case _ => _root_.scala.None
        |""".stripMargin
 
-  private def documentation(function: FunctionDecl, projectRoot: Path, lowLevel: Boolean, extra: Seq[String] = Seq.empty): String =
-    val ownership =
-      (function.resultOwnership.map(value => s"Result ownership: ${value.toString.toLowerCase}.").toSeq ++
-        function.parameters.flatMap(p => p.ownership.map(value => s"Parameter `${p.name}` ownership: ${value.toString.toLowerCase}.")))
-    val implementation = function.definition.map(location => s"Implementation: `${location.display(projectRoot)}`.")
-    val layer = if lowLevel then Seq("This declaration preserves the native C calling convention.") else Seq.empty
-    ScaladocFormatter.format(function.comment.toSeq ++ ownership ++ extra ++ layer ++ implementation ++ Seq(
-      s"Native symbol: `${function.name}`.",
-      s"Declaration: `${function.location.display(projectRoot)}`."
-    ), "  ")
+  private def documentation(function: FunctionDecl, extra: Seq[String] = Seq.empty): String =
+    ScaladocFormatter.format(
+      function.comment.toSeq ++ extra ++ Seq(s"Native symbol: `${function.name}`."),
+      "  "
+    )
 
   private def persistentCallback(function: FunctionDecl): Boolean =
     function.parameters.exists(_.cType.isCallback) &&

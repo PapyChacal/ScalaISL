@@ -27,6 +27,10 @@ object Checks:
     assert(combined.contains("CallbackRegistration[Option[Fixture]]"))
     assert(combined.contains("enum IslBool"))
     assert(combined.contains("opaque type IslSize"))
+    assert(!combined.contains("Result ownership:"))
+    assert(!combined.contains("Parameter `fixture` ownership:"))
+    assert(!combined.contains("Implementation:"))
+    assert(!combined.contains("Declaration:"))
     assert(!rendered.diagnostics.exists(_.startsWith("unsupported raw declaration")))
 
     val formatted = ScaladocFormatter.format(Seq("first paragraph\n\ncode */ fragment"))
