@@ -2,6 +2,7 @@ package com.github.papychacal.isl
 
 import java.lang.ref.Cleaner
 import jnr.ffi.Pointer
+import com.github.papychacal.isl.unsafe.RuntimeLibrary
 
 enum IslBool(val nativeValue: Int):
   case Error extends IslBool(-1)
@@ -35,17 +36,108 @@ object IslSize:
     def isError: Boolean = size == Error
     def toLongOption: Option[Long] = Option.unless(isError)(size)
 
-private[isl] final class NativeHandle private (val pointer: Pointer)
+enum IslErrorKind:
+  case Abort, Allocation, Unknown, Internal, Invalid, Quota, Unsupported
+  case MissingNativeDiagnostic
+
+/** An error reported by ISL while evaluating a native call. */
+final class IslError private[isl] (
+    val kind: IslErrorKind,
+    val nativeMessage: Option[String],
+    val nativeFile: Option[String],
+    val nativeLine: Option[Int],
+    val nativeSymbol: String
+) extends RuntimeException(IslError.message(kind, nativeMessage, nativeFile, nativeLine, nativeSymbol))
+
+private object IslError:
+  private def message(
+      kind: IslErrorKind,
+      nativeMessage: Option[String],
+      nativeFile: Option[String],
+      nativeLine: Option[Int],
+      nativeSymbol: String
+  ): String =
+    val detail = nativeMessage.getOrElse("ISL returned null without recording an error")
+    val location = nativeFile.map(file => s" at $file${nativeLine.fold("")(line => s":$line")}").getOrElse("")
+    s"$nativeSymbol failed ($kind): $detail$location"
+
+private[isl] object NativeCall:
+  private val ErrorNone = 0
+  private val OnErrorContinue = 1
+
+  def allocateContext(nativeSymbol: String)(call: => Pointer): Pointer =
+    val pointer = call
+    if pointer == null then
+      throw new IslError(
+        IslErrorKind.MissingNativeDiagnostic,
+        Some("ISL could not allocate a context"),
+        None,
+        None,
+        nativeSymbol
+      )
+    val status = RuntimeLibrary.instance.isl_options_set_on_error(pointer, OnErrorContinue)
+    if status < 0 then throw takeError(pointer, "isl_options_set_on_error")
+    RuntimeLibrary.instance.isl_ctx_reset_error(pointer)
+    pointer
+
+  def requiredPointer(context: Pointer, nativeSymbol: String)(call: => Pointer): Pointer =
+    prepare(context)
+    val pointer = call
+    if pointer != null then pointer
+    else throw errorOrMissingDiagnostic(context, nativeSymbol)
+
+  def optionalPointer(context: Pointer, nativeSymbol: String)(call: => Pointer): Option[Pointer] =
+    prepare(context)
+    val pointer = call
+    if pointer != null then Some(pointer)
+    else if RuntimeLibrary.instance.isl_ctx_last_error(context) == ErrorNone then None
+    else throw takeError(context, nativeSymbol)
+
+  private def prepare(context: Pointer): Unit =
+    if context == null then throw IllegalStateException("native object has no ISL context")
+    RuntimeLibrary.instance.isl_ctx_reset_error(context)
+
+  private def errorOrMissingDiagnostic(context: Pointer, nativeSymbol: String): IslError =
+    if RuntimeLibrary.instance.isl_ctx_last_error(context) == ErrorNone then
+      new IslError(IslErrorKind.MissingNativeDiagnostic, None, None, None, nativeSymbol)
+    else takeError(context, nativeSymbol)
+
+  private def takeError(context: Pointer, nativeSymbol: String): IslError =
+    val library = RuntimeLibrary.instance
+    val code = library.isl_ctx_last_error(context)
+    val message = Option(library.isl_ctx_last_error_msg(context))
+    val file = Option(library.isl_ctx_last_error_file(context))
+    val line = library.isl_ctx_last_error_line(context)
+    library.isl_ctx_reset_error(context)
+    new IslError(
+      errorKind(code),
+      message,
+      file,
+      Option.when(line >= 0)(line),
+      nativeSymbol
+    )
+
+  private def errorKind(code: Int): IslErrorKind = code match
+    case 1 => IslErrorKind.Abort
+    case 2 => IslErrorKind.Allocation
+    case 3 => IslErrorKind.Unknown
+    case 4 => IslErrorKind.Internal
+    case 5 => IslErrorKind.Invalid
+    case 6 => IslErrorKind.Quota
+    case 7 => IslErrorKind.Unsupported
+    case _ => IslErrorKind.MissingNativeDiagnostic
+
+private[isl] final class NativeHandle private (val pointer: Pointer, val context: Pointer)
 
 private[isl] object NativeHandle:
   private val cleaner = Cleaner.create()
 
-  def owned(pointer: Pointer, release: Pointer => Unit): NativeHandle =
-    val handle = NativeHandle(pointer)
+  def owned(pointer: Pointer, context: Pointer, release: Pointer => Unit): NativeHandle =
+    val handle = NativeHandle(pointer, context)
     cleaner.register(handle, () => release(pointer))
     handle
 
-  def borrowed(pointer: Pointer): NativeHandle = NativeHandle(pointer)
+  def borrowed(pointer: Pointer, context: Pointer): NativeHandle = NativeHandle(pointer, context)
 
 final class CallbackRegistration[+A] private[isl] (
     val value: A,

@@ -3,6 +3,7 @@
 
 typedef struct isl_fixture isl_fixture;
 typedef struct isl_empty isl_empty;
+typedef struct isl_ctx isl_ctx;
 
 enum isl_fixture_mode {
 	isl_fixture_mode_first = 0,
@@ -14,7 +15,7 @@ typedef int (*isl_fixture_callback)(__isl_keep isl_fixture *value, void *user);
 
 /** Construct a fixture from a textual description. */
 __isl_constructor __isl_give isl_fixture *isl_fixture_read_from_str(
-	__isl_keep void *ctx, const char *text);
+	__isl_keep isl_ctx *ctx, const char *text);
 
 /** Visit each value without transferring ownership. */
 __isl_export int isl_fixture_foreach(__isl_keep isl_fixture *fixture,

@@ -1,6 +1,7 @@
 package com.github.papychacal.isl.unsafe
 
 import java.nio.file.{Files, Path, StandardCopyOption}
+import jnr.ffi.Pointer
 import jnr.ffi.LibraryLoader
 
 private[unsafe] object NativeLibrary:
@@ -25,3 +26,14 @@ private[unsafe] object NativeLibrary:
       .search(extractedDirectory.toAbsolutePath.toString)
       .failImmediately()
       .load("isl")
+
+private[isl] trait RuntimeLibrary:
+  def isl_ctx_last_error(ctx: Pointer): Int
+  def isl_ctx_last_error_msg(ctx: Pointer): String
+  def isl_ctx_last_error_file(ctx: Pointer): String
+  def isl_ctx_last_error_line(ctx: Pointer): Int
+  def isl_ctx_reset_error(ctx: Pointer): Unit
+  def isl_options_set_on_error(ctx: Pointer, value: Int): Int
+
+private[isl] object RuntimeLibrary:
+  lazy val instance: RuntimeLibrary = NativeLibrary.load(classOf[RuntimeLibrary])

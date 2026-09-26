@@ -27,7 +27,9 @@ object Checks:
     val emptyClass = "final class Empty private[isl] (private[isl] val handle: NativeHandle)"
     assert(combined.contains(emptyClass))
     assert(!combined.contains(emptyClass + ":"))
-    assert(combined.contains("CallbackRegistration[Option[Fixture]]"))
+    assert(combined.contains("CallbackRegistration[Fixture]"))
+    assert(combined.contains("NativeCall.requiredPointer"))
+    assert(!combined.contains("Option(native.ISLLibrary"))
     assert(combined.contains("NativeLibrary.load(classOf[ISLLibrary"))
     assert(!combined.contains("NativeLibraryResource"))
     assert(!combined.contains("cleaner.register"))
