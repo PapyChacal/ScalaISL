@@ -119,6 +119,11 @@ object ScalaRenderer:
       .flatMap(f => Model.objectType(f.parameters.head.cType).map(_ -> f)).toMap
     val copyFunctions = functions.filter(f => f.name.endsWith("_copy") && f.parameters.size == 1)
       .flatMap(f => Model.objectType(f.parameters.head.cType).map(_ -> f)).toMap
+    val contextGetters = functions.filter { function =>
+      Model.objectType(function.result).contains("isl_ctx") && function.parameters.size == 1
+    }.flatMap { function =>
+      Model.objectType(function.parameters.head.cType).map(_ -> function)
+    }.toMap
 
     val enums = model.enums.filterNot(e => Set("isl_bool", "isl_stat").contains(e.name))
       .filter(_.values.nonEmpty).map(renderEnum).mkString("\n")
@@ -127,31 +132,32 @@ object ScalaRenderer:
       val className = scalaTypeName(objectType)
       val instanceCandidates = functions.filter(f => f.parameters.headOption.flatMap(p => Model.objectType(p.cType)).contains(objectType))
         .filterNot(f => f.name.endsWith("_free") || f.name.endsWith("_copy"))
-      val instanceMethods = renderPublicMethods(instanceCandidates, Some(objectType), hasReceiver = true, model, callbackNames, functionParts, copyFunctions, diagnostics)
+      val instanceMethods = renderPublicMethods(instanceCandidates, Some(objectType), hasReceiver = true, model, callbackNames, functionParts, copyFunctions, contextGetters, diagnostics)
       val companionCandidates = functions.filter(f => Model.objectType(f.result).contains(objectType))
         .filterNot(f => f.parameters.headOption.flatMap(p => Model.objectType(p.cType)).contains(objectType))
-      val companionMethods = renderPublicMethods(companionCandidates, Some(objectType), hasReceiver = false, model, callbackNames, functionParts, copyFunctions, diagnostics)
+      val companionMethods = renderPublicMethods(companionCandidates, Some(objectType), hasReceiver = false, model, callbackNames, functionParts, copyFunctions, contextGetters, diagnostics)
       val free = freeFunctions.get(objectType).map(f => s"pointer => ${nativeLibrary(f.name, functionParts)}.${scalaIdentifier(f.name)}(pointer)")
         .getOrElse("_ => ()")
-      val copyMethod = copyFunctions.get(objectType).map { function =>
-        s"""  /** Return an independently owned native copy. */
-           |  def copy(): $className = $className.owned(
-           |    NativeCall.requiredPointer(handle.context, "${function.name}")(${nativeLibrary(function.name, functionParts)}.${scalaIdentifier(function.name)}(handle.pointer)),
-           |    handle.context
-           |  )
-           |""".stripMargin
+      val copyMethod = copyFunctions.get(objectType).flatMap { function =>
+        contextExpression(objectType, "handle.pointer", contextGetters, functionParts) match
+          case Right(context) => Some(
+            s"""  /** Return an independently owned native copy. */
+               |  def copy(): $className = $className.owned(
+               |    NativeCall.requiredPointer($context, "${function.name}")(${nativeLibrary(function.name, functionParts)}.${scalaIdentifier(function.name)}(handle.pointer))
+               |  )
+               |""".stripMargin
+          )
+          case Left(reason) =>
+            diagnostics += s"unsupported Scala copy method ${function.signature}: $reason"
+            None
       }.getOrElse("")
       val classBody = copyMethod + instanceMethods
       val classDefinition =
         val declaration = s"final class $className private[isl] (private[isl] val handle: NativeHandle)"
         if classBody.isEmpty then declaration else s"$declaration:\n$classBody"
       val wrappers =
-        if objectType == "isl_ctx" then
-          s"""  private[isl] def owned(pointer: Pointer): $className = new $className(NativeHandle.owned(pointer, pointer, $free))
-             |  private[isl] def borrowed(pointer: Pointer): $className = new $className(NativeHandle.borrowed(pointer, pointer))""".stripMargin
-        else
-          s"""  private[isl] def owned(pointer: Pointer, context: Pointer): $className = new $className(NativeHandle.owned(pointer, context, $free))
-             |  private[isl] def borrowed(pointer: Pointer, context: Pointer): $className = new $className(NativeHandle.borrowed(pointer, context))""".stripMargin
+        s"""  private[isl] def owned(pointer: Pointer): $className = new $className(NativeHandle.owned(pointer, $free))
+           |  private[isl] def borrowed(pointer: Pointer): $className = new $className(NativeHandle.borrowed(pointer))""".stripMargin
       s"""$classDefinition
          |
          |object $className:
@@ -165,7 +171,7 @@ object ScalaRenderer:
         functions.filter(f => Model.objectType(f.result).contains(objectType)).map(_.name)
     }.toSet
     val globals = renderPublicMethods(functions.filterNot(f => objectFunctionNames.contains(f.name)), None, hasReceiver = false, model,
-      callbackNames, functionParts, copyFunctions, diagnostics)
+      callbackNames, functionParts, copyFunctions, contextGetters, diagnostics)
 
     s"""package com.github.papychacal.isl
        |
@@ -186,10 +192,11 @@ object ScalaRenderer:
       callbackNames: Map[String, String],
       functionParts: Map[String, Int],
       copyFunctions: Map[String, FunctionDecl],
+      contextGetters: Map[String, FunctionDecl],
       diagnostics: mutable.ArrayBuffer[String]
   ): String =
     val rendered = functions.flatMap { function =>
-      renderPublicMethod(function, owner, hasReceiver, model, callbackNames, functionParts, copyFunctions) match
+      renderPublicMethod(function, owner, hasReceiver, model, callbackNames, functionParts, copyFunctions, contextGetters) match
         case Right(method) => Some(method)
         case Left(reason) =>
           diagnostics += s"unsupported Scala API declaration ${function.signature}: $reason"
@@ -209,7 +216,8 @@ object ScalaRenderer:
       model: IslModel,
       callbackNames: Map[String, String],
       functionParts: Map[String, Int],
-      copyFunctions: Map[String, FunctionDecl]
+      copyFunctions: Map[String, FunctionDecl],
+      contextGetters: Map[String, FunctionDecl]
   ): Either[String, (String, String, String)] =
     if function.result.isCallback then
       return Left("returning a native callback requires an explicit lifetime policy")
@@ -218,7 +226,7 @@ object ScalaRenderer:
     for
       resultType <- publicResultType(function, model, callbackNames)
       parameterTypes <- sequence(visibleParameters.map(p => publicType(p.cType, model, callbackNames, isResult = false)))
-      context <- callContext(function, hasReceiver)
+      context <- callContext(function, hasReceiver, contextGetters, functionParts)
       arguments <- sequence(function.parameters.zipWithIndex.map { (parameter, index) =>
         if hasReceiver && index == 0 then
           parameter.ownership match
@@ -227,7 +235,7 @@ object ScalaRenderer:
                 .map(copy => s"${nativeLibrary(copy.name, functionParts)}.${scalaIdentifier(copy.name)}(handle.pointer)")
                 .toRight(s"receiver is __isl_take but has no copy function")
             case _ => Right("handle.pointer")
-        else renderArgument(function, parameter, scalaIdentifier(parameter.name), model, callbackNames, functionParts, copyFunctions, context)
+        else renderArgument(function, parameter, scalaIdentifier(parameter.name), model, callbackNames, functionParts, copyFunctions)
       })
       persistent = persistentCallback(function)
       callbackBindings =
@@ -267,8 +275,7 @@ object ScalaRenderer:
       model: IslModel,
       callbackNames: Map[String, String],
       functionParts: Map[String, Int],
-      copyFunctions: Map[String, FunctionDecl],
-      context: Option[String]
+      copyFunctions: Map[String, FunctionDecl]
   ): Either[String, String] =
     Model.objectType(parameter.cType) match
       case Some(objectType) =>
@@ -278,7 +285,6 @@ object ScalaRenderer:
             .toRight(s"${parameter.name} is __isl_take but $objectType has no copy function")
           case _ => Right(s"$name.handle.pointer")
       case None if parameter.cType.isCallback =>
-        val callbackContext = context.get
         val callbackName = callbackNames(parameter.cType.canonical)
         val argumentTypes = parameter.cType.callbackParameters.map(t => rawType(t, Map.empty).getOrElse("Pointer"))
         val taken = CallbackOwnershipRules.takenArguments.getOrElse((function.name, parameter.name), Set.empty)
@@ -286,10 +292,10 @@ object ScalaRenderer:
           case (cType, index) if taken.contains(index) && Model.objectType(cType).nonEmpty =>
             val variable = s"_ownedArg${index + 1}"
             val objectType = Model.objectType(cType).get
-            (index, variable, s"val $variable = ${wrapObject(objectType, "owned", s"arg${index + 1}", callbackContext)}")
+            (index, variable, s"val $variable = ${wrapObject(objectType, "owned", s"arg${index + 1}")}")
         }
         val convertedArguments = parameter.cType.callbackParameters.zipWithIndex.map { (cType, index) =>
-          ownedBindings.find(_._1 == index).map(_._2).getOrElse(callbackArgument(cType, s"arg${index + 1}", callbackContext))
+          ownedBindings.find(_._1 == index).map(_._2).getOrElse(callbackArgument(cType, s"arg${index + 1}"))
         }.mkString(", ")
         val invocation = s"$name($convertedArguments)"
         val convertedResult = callbackResult(parameter.cType.callbackResult.get, invocation)
@@ -307,9 +313,9 @@ object ScalaRenderer:
           case value if value.startsWith("enum isl_") => Right(s"$name.nativeValue")
           case _ => Right(name)
 
-  private def callbackArgument(cType: CType, name: String, context: String): String =
+  private def callbackArgument(cType: CType, name: String): String =
     Model.objectType(cType) match
-      case Some(objectType) => wrapObject(objectType, "borrowed", name, context)
+      case Some(objectType) => wrapObject(objectType, "borrowed", name)
       case None => normalize(cType.canonical) match
         case "isl_bool" => s"IslBool.fromNative($name)"
         case "isl_stat" => s"IslStat.fromNative($name)"
@@ -327,10 +333,8 @@ object ScalaRenderer:
         case value if value.startsWith("enum isl_") => s"$invocation.map(_.nativeValue).getOrElse(-1)"
         case _ => invocation
 
-  private def wrapObject(objectType: String, ownership: String, pointer: String, context: String): String =
-    val name = scalaTypeName(objectType)
-    if objectType == "isl_ctx" then s"$name.$ownership($pointer)"
-    else s"$name.$ownership($pointer, $context)"
+  private def wrapObject(objectType: String, ownership: String, pointer: String): String =
+    s"${scalaTypeName(objectType)}.$ownership($pointer)"
 
   private def renderResult(
       function: FunctionDecl,
@@ -343,11 +347,13 @@ object ScalaRenderer:
         val wrap = if ownership.contains(Ownership.Give) then "owned" else "borrowed"
         if objectType == "isl_ctx" && function.name.startsWith("isl_ctx_alloc") then
           Right(s"Ctx.$wrap(NativeCall.allocateContext(\"${function.name}\")($call))")
+        else if objectType == "isl_ctx" && function.name.endsWith("_get_ctx") then
+          Right(s"Ctx.$wrap(NativeCall.contextPointer(\"${function.name}\")($call))")
         else context.toRight(s"cannot recover an ISL context for object result").map { ctx =>
           if OptionalObjectResults.names.contains(function.name) then
-            s"NativeCall.optionalPointer($ctx, \"${function.name}\")($call).map(pointer => ${scalaTypeName(objectType)}.$wrap(pointer${if objectType == "isl_ctx" then "" else s", $ctx"}))"
+            s"NativeCall.optionalPointer($ctx, \"${function.name}\")($call).map(${scalaTypeName(objectType)}.$wrap)"
           else
-            s"${scalaTypeName(objectType)}.$wrap(NativeCall.requiredPointer($ctx, \"${function.name}\")($call)${if objectType == "isl_ctx" then "" else s", $ctx"})"
+            s"${scalaTypeName(objectType)}.$wrap(NativeCall.requiredPointer($ctx, \"${function.name}\")($call))"
         }
       case None =>
         normalize(function.result.canonical) match
@@ -370,17 +376,38 @@ object ScalaRenderer:
         Right(if OptionalObjectResults.names.contains(function.name) then s"Option[$name]" else name)
       case None => publicType(function.result, model, callbackNames, isResult = true)
 
-  private def callContext(function: FunctionDecl, hasReceiver: Boolean): Either[String, Option[String]] =
-    if function.name.startsWith("isl_ctx_alloc") then Right(None)
-    else if hasReceiver then Right(Some("handle.context"))
+  private def callContext(
+      function: FunctionDecl,
+      hasReceiver: Boolean,
+      contextGetters: Map[String, FunctionDecl],
+      functionParts: Map[String, Int]
+  ): Either[String, Option[String]] =
+    if function.name.startsWith("isl_ctx_alloc") ||
+        (Model.objectType(function.result).contains("isl_ctx") && function.name.endsWith("_get_ctx")) then Right(None)
+    else if Model.objectType(function.result).isEmpty then Right(None)
+    else if hasReceiver then
+      Model.objectType(function.parameters.head.cType)
+        .toRight("receiver has no object type")
+        .flatMap(objectType => contextExpression(objectType, "handle.pointer", contextGetters, functionParts).map(Some(_)))
     else
       function.parameters.collectFirst {
-        case parameter if Model.objectType(parameter.cType).nonEmpty =>
-          s"${scalaIdentifier(parameter.name)}.handle.context"
-      }.map(value => Right(Some(value))).getOrElse {
-        val needsContext = Model.objectType(function.result).nonEmpty || function.parameters.exists(_.cType.isCallback)
-        if needsContext then Left("native call has no context-bearing argument") else Right(None)
-      }
+        case parameter if Model.objectType(parameter.cType).nonEmpty => parameter
+      } match
+        case Some(parameter) =>
+          val objectType = Model.objectType(parameter.cType).get
+          contextExpression(objectType, s"${scalaIdentifier(parameter.name)}.handle.pointer", contextGetters, functionParts).map(Some(_))
+        case None => Left("object result has no context-bearing argument")
+
+  private def contextExpression(
+      objectType: String,
+      pointer: String,
+      contextGetters: Map[String, FunctionDecl],
+      functionParts: Map[String, Int]
+  ): Either[String, String] =
+    if objectType == "isl_ctx" then Right(pointer)
+    else contextGetters.get(objectType)
+      .toRight(s"$objectType has no context getter")
+      .map(getter => s"${nativeLibrary(getter.name, functionParts)}.${scalaIdentifier(getter.name)}($pointer)")
 
   private def publicType(cType: CType, model: IslModel, callbackNames: Map[String, String], isResult: Boolean): Either[String, String] =
     Model.objectType(cType) match

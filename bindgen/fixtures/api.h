@@ -29,6 +29,7 @@ __isl_export __isl_give isl_fixture *isl_fixture_coalesce(__isl_take isl_fixture
 
 __isl_export __isl_give isl_fixture *isl_fixture_copy(__isl_keep isl_fixture *fixture);
 __isl_export void isl_fixture_free(__isl_take isl_fixture *fixture);
+__isl_export isl_ctx *isl_fixture_get_ctx(__isl_keep isl_fixture *fixture);
 
 __isl_export void isl_empty_free(__isl_take isl_empty *empty);
 

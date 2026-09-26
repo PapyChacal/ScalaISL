@@ -29,6 +29,8 @@ object Checks:
     assert(!combined.contains(emptyClass + ":"))
     assert(combined.contains("CallbackRegistration[Fixture]"))
     assert(combined.contains("NativeCall.requiredPointer"))
+    assert(combined.contains("isl_fixture_get_ctx(handle.pointer)"))
+    assert(!combined.contains("handle.context"))
     assert(!combined.contains("Option(native.ISLLibrary"))
     assert(combined.contains("NativeLibrary.load(classOf[ISLLibrary"))
     assert(!combined.contains("NativeLibraryResource"))

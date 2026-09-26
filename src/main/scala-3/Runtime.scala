@@ -80,6 +80,18 @@ private[isl] object NativeCall:
     RuntimeLibrary.instance.isl_ctx_reset_error(pointer)
     pointer
 
+  def contextPointer(nativeSymbol: String)(call: => Pointer): Pointer =
+    val pointer = call
+    if pointer != null then pointer
+    else
+      throw new IslError(
+        IslErrorKind.MissingNativeDiagnostic,
+        Some("ISL object has no context"),
+        None,
+        None,
+        nativeSymbol
+      )
+
   def requiredPointer(context: Pointer, nativeSymbol: String)(call: => Pointer): Pointer =
     prepare(context)
     val pointer = call
@@ -127,17 +139,17 @@ private[isl] object NativeCall:
     case 7 => IslErrorKind.Unsupported
     case _ => IslErrorKind.MissingNativeDiagnostic
 
-private[isl] final class NativeHandle private (val pointer: Pointer, val context: Pointer)
+private[isl] final class NativeHandle private (val pointer: Pointer)
 
 private[isl] object NativeHandle:
   private val cleaner = Cleaner.create()
 
-  def owned(pointer: Pointer, context: Pointer, release: Pointer => Unit): NativeHandle =
-    val handle = NativeHandle(pointer, context)
+  def owned(pointer: Pointer, release: Pointer => Unit): NativeHandle =
+    val handle = NativeHandle(pointer)
     cleaner.register(handle, () => release(pointer))
     handle
 
-  def borrowed(pointer: Pointer, context: Pointer): NativeHandle = NativeHandle(pointer, context)
+  def borrowed(pointer: Pointer): NativeHandle = NativeHandle(pointer)
 
 final class CallbackRegistration[+A] private[isl] (
     val value: A,
