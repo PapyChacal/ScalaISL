@@ -6,8 +6,8 @@ object Example:
     assert(IslStat.Error.nativeValue == -1)
     assert(IslSize.Error.isError)
     assert(IslSize.Error.toLongOption.isEmpty)
-    val ctx = Ctx()
-    val basicSet = BasicSet(ctx, "{ [i, j] : 0 <= i <= 2 and 0 <= j <= 2 }")
+    given ctx: Ctx = Ctx()
+    val basicSet = BasicSet("{ [i, j] : 0 <= i <= 2 and 0 <= j <= 2 }")
     assert(basicSet.isEmpty() == IslBool.False)
     val set = basicSet.toSet()
     var points = 0
@@ -19,7 +19,7 @@ object Example:
     assert(points == 9, s"expected 9 points, visited $points")
 
     val parseError = try
-      BasicSet(ctx, "this is not an ISL set")
+      BasicSet("this is not an ISL set")
       throw AssertionError("invalid input unexpectedly parsed")
     catch case error: IslError => error
     assert(parseError.kind == IslErrorKind.Invalid)

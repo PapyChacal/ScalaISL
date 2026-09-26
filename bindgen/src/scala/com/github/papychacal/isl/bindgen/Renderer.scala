@@ -255,7 +255,15 @@ object ScalaRenderer:
       val methodName =
         if !hasReceiver && owner.nonEmpty && isCompanionConstructor(function, owner.get) then "apply"
         else publicMethodName(function.name, owner)
-      val parameters = visibleParameters.zip(parameterTypes).map { (parameter, tpe) => s"${scalaIdentifier(parameter.name)}: $tpe" }.mkString(", ")
+      val renderedParameters = visibleParameters.zip(parameterTypes).map { (parameter, tpe) =>
+        parameter -> s"${scalaIdentifier(parameter.name)}: $tpe"
+      }
+      val regularParameters = renderedParameters.filterNot((parameter, _) => isContext(parameter)).map(_._2)
+      val contextParameters = renderedParameters.filter((parameter, _) => isContext(parameter)).map(_._2)
+      val regularClause =
+        if regularParameters.nonEmpty || contextParameters.isEmpty then s"(${regularParameters.mkString(", ")})" else ""
+      val contextClause = Option.when(contextParameters.nonEmpty)(s"(using ${contextParameters.mkString(", ")})").getOrElse("")
+      val parameterClauses = regularClause + contextClause
       val finalResultType = if persistent then s"CallbackRegistration[$resultType]" else resultType
       val signature = s"$methodName(${parameterTypes.mkString(",")}):$finalResultType"
       val callbackDoc = Option.when(persistent)("The returned registration retains native callback objects while it remains reachable.").toSeq
@@ -264,9 +272,12 @@ object ScalaRenderer:
         if persistent then
           val bindings = callbackBindings.map((_, variable, expression) => s"    val $variable = $expression").mkString("\n")
           val retained = callbackBindings.map(_._2).mkString("List(", ", ", ")")
-          s"$docs  def $methodName($parameters): $finalResultType =\n$bindings\n    CallbackRegistration($converted, $retained)\n"
-        else s"$docs  def $methodName($parameters): $finalResultType = $converted\n"
+          s"$docs  def $methodName$parameterClauses: $finalResultType =\n$bindings\n    CallbackRegistration($converted, $retained)\n"
+        else s"$docs  def $methodName$parameterClauses: $finalResultType = $converted\n"
       (signature, function.name, method)
+
+  private def isContext(parameter: Parameter): Boolean =
+    Model.objectType(parameter.cType).contains("isl_ctx")
 
   private def renderArgument(
       function: FunctionDecl,
